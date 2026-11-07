@@ -592,14 +592,14 @@ void setup() {
   gpio.begin();
 
 #if FREEINK_LILYGO_EPD47
-  // Plain LilyGo T5-4.7 S3: the middle (BOOT) key is GPIO0, which is also the
-  // panel shift register's open-drain STR line, so it is not a profile pin
-  // (InputManager would reconfigure it as a plain input). It reads low while
-  // pressed; a strobe is ~1 us, well inside the input debounce. Pages back,
-  // like the X4 Pro's GPIO0 key.
-  InputManager::setButtonHook([]() -> uint8_t {
-    return gpio_get_level(GPIO_NUM_0) == 0 ? static_cast<uint8_t>(1 << InputManager::BTN_UP) : 0;
-  });
+  // Plain LilyGo T5-4.7 S3: the BOOT key (profile "up") is GPIO0, which is also
+  // the panel shift register's STR line. InputManager just made it a plain
+  // input; put it back to open-drain with the pull-up so it strobes again and
+  // still reads as the key between writes. A strobe is ~1 us, well inside the
+  // input debounce.
+  gpio_set_level(GPIO_NUM_0, 1);
+  gpio_set_direction(GPIO_NUM_0, GPIO_MODE_INPUT_OUTPUT_OD);
+  gpio_pullup_en(GPIO_NUM_0);
 #endif
 
 #if !SOC_PM_SUPPORT_EXT1_WAKEUP

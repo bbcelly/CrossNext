@@ -1233,11 +1233,16 @@ constexpr BoardProfile DE_LINK = {Board::DeLink,
 // Pro pixel for pixel, but with a white border.) No PMIC, gauge, RTC,
 // frontlight or power latch on this board.
 // Panel bus (owned by LilyGo-EPD47): D0..D7 = 8,1,2,3,4,5,6,7, CKV 38, STH 40,
-// CKH 41, shift register data 13 / clock 12 / store 0 (BOOT, so BOOT is no button).
+// CKH 41, shift register data 13 / clock 12 / store 0 (also the BOOT key; the
+// firmware keeps GPIO0 open-drain so it can read the key between strobes).
 constexpr BoardProfile LILYGO_T5S3 = {
     Board::LilyGoT5S3,
     "lilygo_t5s3_epd47",
-    InputStyle::DigitalButtons,
+    // Two keys: short = previous (BOOT, middle) / next (top). In the
+    // lilygo_epd47 env hold BOOT = home key tap, hold top = power, hold both =
+    // nothing (FREEINK_TWO_BUTTON_HOLD_UP_HOME / _HOLD_DOWN_POWER); confirm and
+    // back are on the screen.
+    InputStyle::DigitalTwoButton,
     DisplayController::LgfxEpd,  // raw-parallel class; Epd47Driver is chosen by FREEINK_DRIVER_EPD47
     960,
     540,
@@ -1245,9 +1250,10 @@ constexpr BoardProfile LILYGO_T5S3 = {
      PIN_UNASSIGNED},                            // no SPI display pins
     0,                                           // displaySpiHz n/a (external bus)
     {11, 16, 15, 42, PIN_UNASSIGNED, false, 0},  // SD over SPI: SCLK11 MISO16 MOSI15 CS42
-    // Only GPIO21 (top key) is a free button; it pages forward like the X4 Pro's right key.
+    // up = BOOT (GPIO0), down = top key (GPIO21). power = GPIO21 only as the
+    // deep-sleep wake pin (RTC-capable); the two-button style never reads it.
     // {back, confirm, left, right, up, down, power, powerActiveHigh}
-    {PIN_UNASSIGNED, PIN_UNASSIGNED, PIN_UNASSIGNED, PIN_UNASSIGNED, PIN_UNASSIGNED, 21, PIN_UNASSIGNED, false},
+    {PIN_UNASSIGNED, PIN_UNASSIGNED, PIN_UNASSIGNED, PIN_UNASSIGNED, 0, 21, 21, false},
     14,              // batteryAdc: GPIO14 through a 1:2 divider
     PIN_UNASSIGNED,  // batteryChargeStatus
     2.0f,
@@ -1255,7 +1261,8 @@ constexpr BoardProfile LILYGO_T5S3 = {
     // GT911 on SDA18 SCL17 INT47, no reset line wired. Same portrait digitizer as the
     // Pro (swapXY + flipY), covering the whole glass.
     {TouchController::Gt911, 18, 17, 47, PIN_UNASSIGNED, 0x5D, 0, 959, 0, 539, false, 0x14, false, true,
-     PIN_UNASSIGNED, true, false, true, false},  // powerEnable, swapXY, flipX, flipY, hasHomeKey
+     // hasHomeKey: no capacitive key, but holding BOOT emits home-key taps.
+     PIN_UNASSIGNED, true, false, true, true},  // powerEnable, swapXY, flipX, flipY, hasHomeKey
     NO_FRONTLIGHT,
     NO_AUDIO,
     NO_LEDS,

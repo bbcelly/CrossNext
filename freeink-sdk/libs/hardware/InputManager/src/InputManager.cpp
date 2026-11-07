@@ -556,9 +556,32 @@ void InputManager::updateDigitalTwoButton(const unsigned long currentTime) {
   }
 
   uint8_t nextState = auxiliaryState;
+#if FREEINK_TWO_BUTTON_HOLD_UP_HOME
+  // Boards whose confirm and back come from the screen give the up-key hold
+  // to the home key instead: one home tap per hold, as the GT911 key would.
+  if (physical == 1 && currentTime - twoButtonPressStart >= TWO_BUTTON_HOLD_MS) {
+    if (!twoButtonLongPressActive) {
+      touchHomeKeyEvent = true;
+      touchHomeKeyTapEvent = true;
+    }
+    twoButtonLongPressActive = true;
+    applyStateChange(nextState, currentTime);
+    return;
+  }
+#endif
   if (currentTime - twoButtonPressStart >= TWO_BUTTON_HOLD_MS) {
     twoButtonLongPressActive = true;
+#if FREEINK_TWO_BUTTON_HOLD_DOWN_POWER
+    // ...and the down-key hold to power, so one key sleeps the device. Holding
+    // both does nothing.
+    if (physical == 3) {
+      applyStateChange(nextState, currentTime);
+      return;
+    }
+    const uint8_t logical = physical == 1 ? BTN_BACK : BTN_POWER;
+#else
     const uint8_t logical = physical == 1 ? BTN_BACK : physical == 2 ? BTN_CONFIRM : BTN_POWER;
+#endif
     nextState |= static_cast<uint8_t>(1u << logical);
   }
   applyStateChange(nextState, currentTime);

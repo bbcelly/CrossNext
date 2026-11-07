@@ -1,3 +1,5 @@
+#include <driver/rtc_io.h>
+#include <esp_sleep.h>
 #include "PowerManager.h"
 
 #include <Arduino.h>
@@ -60,6 +62,23 @@ bool PowerManager::armPowerButtonWakeup() {
 
   // Hold the idle level with the opposite pull so the line is defined in sleep.
   pinMode(pin, activeHigh ? INPUT_PULLDOWN : INPUT_PULLUP);
+#if SOC_RTCIO_INPUT_OUTPUT_SUPPORTED
+  // The digital pull set above does not hold in deep sleep. A key with no
+  // external pull (plain LilyGo T5-4.7 S3, GPIO21) then floats to its pressed
+  // level and wakes the device the moment it sleeps. Hold the same pull in the
+  // RTC domain and keep that domain powered through sleep.
+  const auto g = static_cast<gpio_num_t>(pin);
+  if (rtc_gpio_is_valid_gpio(g)) {
+    if (activeHigh) {
+      rtc_gpio_pullup_dis(g);
+      rtc_gpio_pulldown_en(g);
+    } else {
+      rtc_gpio_pulldown_dis(g);
+      rtc_gpio_pullup_en(g);
+    }
+    esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON);
+  }
+#endif
   armWakeOnPins(1ULL << pin, /*wakeLow=*/!activeHigh);
   return true;
 }
