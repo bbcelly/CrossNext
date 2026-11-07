@@ -32,6 +32,9 @@ does nothing.
    that draws correctly on this S3 bus (USER_I2S_REG 0); it now uses the same
    natural order. Input bit 0 is the leftmost pixel of each byte.
 
+5. src/ed047tc1.c: STR (GPIO0, also the BOOT key) becomes open-drain with
+   its pull-up, so the firmware can read the key between register writes.
+
 Registered as pre: (so library.json is trimmed before the library finder reads
 it) and post: (to catch a dependency installed during this very build; that
 first build then needs one re-run). Like patch_sdfat.py it touches only this
@@ -74,6 +77,18 @@ SOURCE_PATCHES = (
          b"vTaskDeleteWithCaps(t1);\r\n        vTaskDeleteWithCaps(t2);"),
         (b"        wide_epd_input[j] = (lut_1bpp[v1] << 16) | lut_1bpp[v2];",
          b"        wide_epd_input[j] = (lut_1bpp[v1] | (lut_1bpp[v2] << 16)) << (mode == WHITE_ON_BLACK ? 1 : 0);"),
+    ]),
+    # The BOOT key shares GPIO0 with the shift register's STR (store) line.
+    # Open-drain with the pull-up: STR still strobes, a pressed key only holds
+    # the register's outputs (STR low) and never fights a driven-high pin, and
+    # between writes the pin reads back as the key (firmware's button hook).
+    # After each release the pull-up needs a moment before the next strobe.
+    ("src/ed047tc1.c", "7a2332f538bb5528a3c9f2d3ee58b41e7967c1329751d78586531d425cb86e38", [
+        (b"#include <string.h>\n", b"#include <string.h>\n#include <esp_rom_sys.h>\n"),
+        (b"    gpio_set_direction(CFG_STR, GPIO_MODE_OUTPUT);\n",
+         b"    gpio_set_direction(CFG_STR, GPIO_MODE_INPUT_OUTPUT_OD);\n    gpio_pullup_en(CFG_STR);\n"),
+        (b"    push_cfg_bit(cfg->ep_latch_enable);\n\n    fast_gpio_set_hi(CFG_STR);\n}",
+         b"    push_cfg_bit(cfg->ep_latch_enable);\n\n    fast_gpio_set_hi(CFG_STR);\n    esp_rom_delay_us(2);\n}"),
     ]),
 )
 
