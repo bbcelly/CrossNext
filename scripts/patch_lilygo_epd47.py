@@ -21,7 +21,9 @@ does nothing.
    core 1 with the render task, and a priority-10 busy wait there lost taps.
    That row queue (64 x 480 B) moves to PSRAM too: in internal
    RAM it left the JPEG decoder ~4 KB short, so book images failed to decode
-   and showed as black boxes.
+   and showed as black boxes. The 64 KB 4-bit conversion LUT (MALLOC_CAP_8BIT,
+   which lands in internal RAM first) goes to PSRAM as well: with it inside,
+   esp_wifi_init failed with ESP_ERR_NO_MEM and no network was ever found.
 4. src/epd_driver.c: epd_draw_frame_1bit only ever darkens (each set bit
    becomes the 01 push code, whatever the mode). With WHITE_ON_BLACK it now
    shifts the codes to 10, the lighten push, so a differential refresh can
@@ -64,6 +66,8 @@ SOURCE_PATCHES = (
          # starved the Arduino loop, which polls the touch panel.
          b"xTaskCreatePinnedToCoreWithCaps((void (*)(void *))feed_display, \"render\", 8192, &p2,\r\n"
          b"                                10, &t2, 0, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);"),
+        (b"conversion_lut = (uint8_t *)heap_caps_malloc(1 << 16, MALLOC_CAP_8BIT);",
+         b"conversion_lut = (uint8_t *)heap_caps_malloc(1 << 16, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);"),
         (b"output_queue = xQueueCreate(64, EPD_WIDTH / 2);",
          b"output_queue = xQueueCreateWithCaps(64, EPD_WIDTH / 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);"),
         (b"vTaskDelete(t1);\r\n        vTaskDelete(t2);",
