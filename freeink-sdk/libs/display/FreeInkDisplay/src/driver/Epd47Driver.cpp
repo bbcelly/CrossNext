@@ -49,6 +49,12 @@ uint8_t* g_toBlack = nullptr;   // whole-glass push masks
 uint8_t* g_toWhite = nullptr;
 bool g_havePrev = false;        // g_prev matches the glass (set by a clearing refresh)
 
+// Combined grayscale base, held from displayGrayscaleBase() to displayGray().
+uint8_t* g_pending = nullptr;
+uint8_t* g_thin = nullptr;  // pending base with the gray selection left white
+bool g_hasPending = false;
+RefreshMode g_pendingMode = RefreshMode::Fast;
+
 // Push passes and per-row drive time (1/10 us) for a differential refresh.
 // More of either gives deeper blacks and cleaner whites but takes longer.
 #ifndef FREEINK_EPD47_FAST_PASSES
@@ -60,6 +66,11 @@ bool g_havePrev = false;        // g_prev matches the glass (set by a clearing r
 // Clear cycles for the area of an image before its gray composite is drawn.
 #ifndef FREEINK_EPD47_IMAGE_CLEAR_CYCLES
 #define FREEINK_EPD47_IMAGE_CLEAR_CYCLES 2
+#endif
+// A gray selection filling at least this share of its bounding box is an
+// image (cleared and redrawn); below it, anti-aliased text (no clear).
+#ifndef FREEINK_EPD47_IMAGE_DENSITY_PCT
+#define FREEINK_EPD47_IMAGE_DENSITY_PCT 30
 #endif
 
 uint8_t* allocPsram(size_t size) {
@@ -178,6 +189,9 @@ void Epd47Driver::begin(EpdBus& bus) {
   if (!g_grayMask) g_grayMask = allocPsram(plane);
   if (!g_toBlack) g_toBlack = allocPsram(kMaskBytes);
   if (!g_toWhite) g_toWhite = allocPsram(kMaskBytes);
+  if (!g_pending) g_pending = allocPsram(plane);
+  if (!g_thin) g_thin = allocPsram(plane);
+  g_hasPending = false;
   g_havePrev = false;  // the glass is unknown until the first clearing refresh
   buildBitrev();
   if (g_base) memset(g_base, 0xFF, kPackedBytes);
@@ -191,6 +205,7 @@ void Epd47Driver::display(EpdBus& bus, const uint8_t* fb, const uint8_t* prev, R
   (void)turnOff;  // the rails go off after every refresh anyway
 #if FREEINK_DRIVER_EPD47
   if (!g_base || !fb) return;
+  g_hasPending = false;  // a plain refresh supersedes a held grayscale base
   fillBase(fb);
   if (mode == RefreshMode::Fast && fastRefresh(fb)) {
     rememberFrame(fb);
@@ -243,12 +258,16 @@ void Epd47Driver::writeGrayscalePlaneStrip(EpdBus& bus, GrayPlane plane, const u
 // fb is not the page here (the host leaves its last plane in it, see
 // LgfxEpdDriver's overlayCanvasGray); the B/W page is already on the glass.
 //
-// Two cases. Anti-aliased text selects pixels the base left white, and drawing
-// only darkens, so an image that is white except the selected pixels goes on
-// top: no clear, no flash. Images are drawn black in the base and lightened by
-// their planes; pushing those back to white leaves them muddy, so the selected
-// area is cleared and the whole composite (base + grays) drawn in one 4-bit
-// pass, which is what gives clean gray levels on this panel.
+// Selected pixels may be white in the base (drawing only darkens, fine) or
+// black (images are drawn black in the base and lightened by their planes;
+// anti-aliased glyph edges can be too). Two cases, told apart by how densely
+// the selection fills its bounding box:
+// - dense (an image): clear that box and draw the whole composite (base +
+//   grays) in one 4-bit pass, the only way to clean gray levels on this panel;
+//   the box flashes once.
+// - sparse (anti-aliased text): pulse the black-selected pixels white with the
+//   1-bit lighten push, then darken the selection on top. No clear, no flash,
+//   and the few edge pixels do not show the residue a pulsed image would.
 void Epd47Driver::displayGray(EpdBus& bus, const uint8_t* fb, bool turnOff, const unsigned char* lut,
                               bool factoryMode) {
   (void)bus;
@@ -258,16 +277,44 @@ void Epd47Driver::displayGray(EpdBus& bus, const uint8_t* fb, bool turnOff, cons
   (void)factoryMode;
 #if FREEINK_DRIVER_EPD47
   if (!g_gray || !g_lsb || !g_msb || !g_base) return;
+  // A held base goes up with its grays. Its selected pixels are put on the
+  // glass white (the thin glyph body), so the grays below only ever darken.
+  bool composite = false;
+  RefreshMode compositeMode = RefreshMode::Fast;
+  if (g_hasPending && g_pending && g_thin) {
+    g_hasPending = false;
+    const uint32_t plane = static_cast<uint32_t>(g_wb) * g_h;
+    for (uint32_t i = 0; i < plane; ++i) g_thin[i] = g_pending[i] | g_lsb[i] | g_msb[i];
+    if (g_pendingMode == RefreshMode::Fast && fastRefresh(g_thin)) {
+      rememberFrame(g_thin);
+      fillBase(g_thin);
+    } else {
+      fillBase(g_thin);
+      rememberFrame(g_thin);
+      composite = true;
+      compositeMode = g_pendingMode;
+    }
+  }
   memset(g_gray, 0xFF, kPackedBytes);
+  const bool canLighten = g_havePrev && g_prev && g_toWhite;
+  if (canLighten) memset(g_toWhite, 0, kMaskBytes);
   bool any = false;
   bool selectsBlack = false;
+  uint32_t selected = 0;
   uint16_t x0 = g_w, y0 = g_h, x1 = 0, y1 = 0;  // logical bounds of the selection
   for (uint16_t y = 0; y < g_h; ++y) {
     const uint32_t row = static_cast<uint32_t>(y) * g_wb;
     for (uint16_t bx = 0; bx < g_wb; ++bx) {
       const uint8_t l = g_lsb[row + bx], m = g_msb[row + bx];
       if ((l | m) == 0) continue;
-      if (g_havePrev && g_prev && ((l | m) & ~g_prev[row + bx])) selectsBlack = true;
+      if (canLighten) {
+        const uint8_t blackSelected = static_cast<uint8_t>((l | m) & ~g_prev[row + bx]);
+        if (blackSelected) {
+          g_toWhite[static_cast<uint32_t>(y + g_offY) * (kPanelW / 8) + g_offX / 8 + bx] = g_bitrev[blackSelected];
+          selectsBlack = true;
+        }
+      }
+      selected += __builtin_popcount(l | m);
       if (bx * 8 < x0) x0 = bx * 8;
       if (bx * 8 + 7 > x1) x1 = bx * 8 + 7;
       if (y < y0) y0 = y;
@@ -284,17 +331,44 @@ void Epd47Driver::displayGray(EpdBus& bus, const uint8_t* fb, bool turnOff, cons
       }
     }
   }
+  if (composite) {
+    // Half/Full: one clear, then base and grays in a single 4-bit pass.
+    epd_poweron();
+    clearFor(compositeMode);
+    epd_draw_grayscale_image(glass(), g_base);
+    epd_poweroff_all();
+    return;
+  }
   if (!any) return;
+  const uint32_t boxArea = static_cast<uint32_t>(x1 - x0 + 1) * (y1 - y0 + 1);
+  const bool dense = selected * 100 >= boxArea * FREEINK_EPD47_IMAGE_DENSITY_PCT;
   epd_poweron();
-  if (selectsBlack) {
+  if (selectsBlack && dense) {
     const Rect_t area = {.x = g_offX + x0, .y = g_offY + y0, .width = x1 - x0 + 1, .height = y1 - y0 + 1};
     epd_clear_area_cycles(area, FREEINK_EPD47_IMAGE_CLEAR_CYCLES, 45);
     epd_draw_grayscale_image(glass(), g_base);
   } else {
+    if (selectsBlack) {
+      for (int pass = 0; pass < FREEINK_EPD47_FAST_PASSES; ++pass) {
+        epd_draw_frame_1bit(glass(), g_toWhite, WHITE_ON_BLACK, FREEINK_EPD47_FAST_TIME);
+      }
+    }
     epd_draw_grayscale_image(glass(), g_gray);
   }
   epd_poweroff_all();
 #endif
+}
+
+void Epd47Driver::displayGrayscaleBase(EpdBus& bus, const uint8_t* fb, RefreshMode fallback, bool turnOff) {
+#if FREEINK_DRIVER_EPD47
+  if (g_pending && g_thin && fb) {
+    memcpy(g_pending, fb, static_cast<size_t>(g_wb) * g_h);
+    g_pendingMode = fallback;
+    g_hasPending = true;
+    return;
+  }
+#endif
+  display(bus, fb, nullptr, fallback, turnOff);  // no buffers: base first, as before
 }
 
 void Epd47Driver::cleanupGrayscaleBuffers(EpdBus& bus, const uint8_t* bw) {

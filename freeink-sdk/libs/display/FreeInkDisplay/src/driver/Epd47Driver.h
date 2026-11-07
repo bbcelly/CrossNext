@@ -31,13 +31,15 @@ class Epd47Driver : public PanelDriver {
   void deepSleep(EpdBus& bus) override;
   void display(EpdBus& bus, const uint8_t* fb, const uint8_t* prev, RefreshMode mode, bool turnOff) override;
 
-  // Same overlay contract as LgfxEpdDriver: the facade streams LSB/MSB 1-bpp
-  // planes, displayGray darkens only the pixels they select on top of the last
-  // B/W push.
+  // Same overlay masks as LgfxEpdDriver: the facade streams LSB/MSB 1-bpp
+  // planes and displayGray applies the grays they select.
   GrayscaleCapabilities grayscaleCapabilities(GrayscaleMode mode = GrayscaleMode::Overlay) const override {
     if (mode != GrayscaleMode::Overlay) return {};
-    return {GrayscaleEncoding::OverlayMasks, GrayscaleBase::Separate, true, false, false};
+    return {GrayscaleEncoding::OverlayMasks, GrayscaleBase::Combined, true, false, false};
   }
+  // Combined base: the B/W base is held until displayGray() so a text page goes
+  // up in one step instead of bold-then-thin.
+  void displayGrayscaleBase(EpdBus& bus, const uint8_t* fb, RefreshMode fallback, bool turnOff) override;
   void copyGrayscaleLsb(EpdBus& bus, const uint8_t* lsb) override;
   void copyGrayscaleMsb(EpdBus& bus, const uint8_t* msb) override;
   void writeGrayscalePlaneStrip(EpdBus& bus, GrayPlane plane, const uint8_t* rows, uint16_t yStart,
