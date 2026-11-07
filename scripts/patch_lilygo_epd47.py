@@ -17,7 +17,9 @@ does nothing.
    second draw after boot (Home) hung there; the cause was not pinned down
    (the internal heap still had a 14 KB block), but with the stacks in PSRAM
    the draw completes. Both tasks only shuffle rows through a queue and never
-   touch flash. That row queue (64 x 480 B) moves to PSRAM too: in internal
+   touch flash. Both run on core 0: the Arduino loop that polls touch shares
+   core 1 with the render task, and a priority-10 busy wait there lost taps.
+   That row queue (64 x 480 B) moves to PSRAM too: in internal
    RAM it left the JPEG decoder ~4 KB short, so book images failed to decode
    and showed as black boxes.
 4. src/epd_driver.c: epd_draw_frame_1bit only ever darkens (each set bit
@@ -58,8 +60,10 @@ SOURCE_PATCHES = (
          b"                                &p1, 10, &t1, 0, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);"),
         (b"xTaskCreatePinnedToCore((void (*)(void *))feed_display, \"render\", 8192, &p2,\r\n"
          b"                                10, &t2, 1);",
+         # Core 0, not 1: feed_display busy-waits at priority 10 and on core 1
+         # starved the Arduino loop, which polls the touch panel.
          b"xTaskCreatePinnedToCoreWithCaps((void (*)(void *))feed_display, \"render\", 8192, &p2,\r\n"
-         b"                                10, &t2, 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);"),
+         b"                                10, &t2, 0, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);"),
         (b"output_queue = xQueueCreate(64, EPD_WIDTH / 2);",
          b"output_queue = xQueueCreateWithCaps(64, EPD_WIDTH / 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);"),
         (b"vTaskDelete(t1);\r\n        vTaskDelete(t2);",
