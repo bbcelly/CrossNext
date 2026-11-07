@@ -1230,8 +1230,8 @@ constexpr BoardProfile DE_LINK = {Board::DeLink,
 // --- LilyGo T5-4.7 E-Paper S3, PLAIN (V2.3/V2.4) as an X4 Pro dev stand-in ---
 // ED047TC1 driven by LilyGo-EPD47 (Epd47Driver), at the glass's native 960x540.
 // (Report 800x480 instead and the driver centres that frame, matching the X4
-// Pro pixel for pixel, but with a white border.) No PMIC, gauge, RTC,
-// frontlight or power latch on this board.
+// Pro pixel for pixel, but with a white border.) No PMIC, gauge, frontlight
+// or power latch on this board; a PCF8563 RTC shares the touch I2C bus.
 // Panel bus (owned by LilyGo-EPD47): D0..D7 = 8,1,2,3,4,5,6,7, CKV 38, STH 40,
 // CKH 41, shift register data 13 / clock 12 / store 0 (also the BOOT key; the
 // firmware keeps GPIO0 open-drain so it can read the key between strobes).
@@ -1270,7 +1270,9 @@ constexpr BoardProfile LILYGO_T5S3 = {
     NO_SDMMC,
     NO_GAUGE,
     NO_MIC,
-    {PIN_UNASSIGNED, PIN_UNASSIGNED, 0, 0, 0, 0, 0, RtcType::None, ImuType::None},
+    // PCF8563 RTC at 0x51 on the touch bus (SDA18 SCL17), per LilyGo-EPD47's
+    // utilities.h and demo for the S3 board.
+    {18, 17, 400000, 0x51, 0, 0, 0, RtcType::Pcf8563, ImuType::None},
     1.2f,   // uiScale: as the T5 S3 Pro on the same 960x540 glass
     {},     // no power latch (GPIO2 is panel D2 here)
     0,

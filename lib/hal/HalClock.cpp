@@ -11,6 +11,16 @@ HalClock halClock;  // Singleton instance
 void HalClock::begin() {
   _available = _sdkRtc.begin();
   LOG_INF("CLK", _available ? "SDK RTC found" : "RTC not found");
+#if FREEINK_SOFTWARE_CLOCK
+  if (!_available) {
+    // Clockless board: keep time in the system clock so the clock settings,
+    // NTP sync and manual setting still work. It survives deep sleep only.
+    _available = true;
+    _software = true;
+    LOG_INF("CLK", "Using the software clock (system time)");
+    return;
+  }
+#endif
 
   // Load the hardware RTC into system time. Nothing else ever did: time()
   // started at the 1970 epoch on every hard boot (flash, reset, battery loss)
@@ -66,6 +76,12 @@ void HalClock::setTimezone(const char* posixTz) {
 
 bool HalClock::localTime(struct tm& out) const {
   if (!_available) return false;
+  if (_software) {
+    const time_t now = time(nullptr);
+    if (now < 1577836800) return false;  // before 2020: never set since the last reset
+    localtime_r(&now, &out);
+    return true;
+  }
 
   const unsigned long now = millis();
   if (_lastPollMs == 0 || (now - _lastPollMs) >= CLOCK_POLL_MS) {
@@ -148,7 +164,8 @@ bool HalClock::syncFromNTP() {
         dt.minute = static_cast<uint8_t>(timeinfo.tm_min);
         dt.second = static_cast<uint8_t>(timeinfo.tm_sec);
         dt.weekday = static_cast<uint8_t>(timeinfo.tm_wday);
-        const bool ok = _sdkRtc.set(dt);
+        // SNTP has already set system time, which is the whole software clock.
+        const bool ok = _software || _sdkRtc.set(dt);
         if (ok) {
           _cachedUtc = epochFromUtc(dt);
           _hasCachedTime = true;
@@ -191,7 +208,7 @@ bool HalClock::setLocalTime(const struct tm& value) {
                          static_cast<uint8_t>(utc.tm_mday),         static_cast<uint8_t>(utc.tm_hour),
                          static_cast<uint8_t>(utc.tm_min),          0,
                          static_cast<uint8_t>(utc.tm_wday)};
-  if (!_sdkRtc.set(dt)) {
+  if (!_software && !_sdkRtc.set(dt)) {
     LOG_ERR("CLK", "RTC refused manual date/time");
     return false;
   }

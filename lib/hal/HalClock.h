@@ -8,6 +8,9 @@ extern HalClock halClock;  // Singleton
 
 class HalClock {
   bool _available = false;
+  // No RTC chip, but FREEINK_SOFTWARE_CLOCK: the clock is the ESP32's system
+  // time, which runs through deep sleep and is lost on reset or power loss.
+  bool _software = false;
   mutable Rtc _sdkRtc;
   // The RTC keeps UTC; local time comes from newlib's localtime_r under the
   // POSIX TZ rule set via setTimezone(), so zones with DST are correct
@@ -24,9 +27,9 @@ class HalClock {
 
   bool available() const { return _available; }
   // Raw hardware-RTC readout, uncached; diagnostics (the dev bridge's DATE).
-  bool raw(Rtc::DateTime& dt) const { return _available && _sdkRtc.now(dt); }
+  bool raw(Rtc::DateTime& dt) const { return _available && !_software && _sdkRtc.now(dt); }
 
-  // True if an RTC is present on this device
+  // True if the device keeps a clock: an RTC chip, or the software clock
   bool isAvailable() const { return _available; }
 
   // Set the POSIX TZ rule (e.g. "CET-1CEST,M3.5.0,M10.5.0/3") applied to every
