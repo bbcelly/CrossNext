@@ -23,8 +23,16 @@ constexpr size_t kPackedBytes = static_cast<size_t>(kPanelW) * kPanelH / 2;
 // in the high one. 0xF is white; drawing only ever darkens towards 0x0.
 constexpr uint8_t kWhite = 0xF;
 constexpr uint8_t kBlack = 0x0;
-constexpr uint8_t kGrayLight = 0xA;
-constexpr uint8_t kGrayDark = 0x5;
+// The overlay's two grays. LilyGo-EPD47's 4-bit levels are far from linear:
+// 0x5/0xA (an even split) come out much too dark, so they sit higher.
+#ifndef FREEINK_EPD47_GRAY_DARK
+#define FREEINK_EPD47_GRAY_DARK 0x9
+#endif
+#ifndef FREEINK_EPD47_GRAY_LIGHT
+#define FREEINK_EPD47_GRAY_LIGHT 0xD
+#endif
+constexpr uint8_t kGrayLight = FREEINK_EPD47_GRAY_LIGHT;
+constexpr uint8_t kGrayDark = FREEINK_EPD47_GRAY_DARK;
 
 uint16_t g_w = 0, g_h = 0, g_wb = 0;  // logical frame (the X4 Pro's 800x480)
 uint16_t g_offX = 0, g_offY = 0;      // where it sits on the glass
@@ -32,6 +40,27 @@ uint8_t* g_base = nullptr;            // last B/W frame as 4-bit gray, whole gla
 uint8_t* g_gray = nullptr;            // gray-only overlay, whole glass
 uint8_t* g_lsb = nullptr;
 uint8_t* g_msb = nullptr;
+
+// Differential (Fast) refresh state, all 1 bpp.
+constexpr size_t kMaskBytes = static_cast<size_t>(kPanelW) / 8 * kPanelH;
+uint8_t* g_prev = nullptr;      // logical frame now on the glass (1 = white)
+uint8_t* g_grayMask = nullptr;  // logical pixels the last gray overlay darkened
+uint8_t* g_toBlack = nullptr;   // whole-glass push masks
+uint8_t* g_toWhite = nullptr;
+bool g_havePrev = false;        // g_prev matches the glass (set by a clearing refresh)
+
+// Push passes and per-row drive time (1/10 us) for a differential refresh.
+// More of either gives deeper blacks and cleaner whites but takes longer.
+#ifndef FREEINK_EPD47_FAST_PASSES
+#define FREEINK_EPD47_FAST_PASSES 4
+#endif
+#ifndef FREEINK_EPD47_FAST_TIME
+#define FREEINK_EPD47_FAST_TIME 400
+#endif
+// Clear cycles for the area of an image before its gray composite is drawn.
+#ifndef FREEINK_EPD47_IMAGE_CLEAR_CYCLES
+#define FREEINK_EPD47_IMAGE_CLEAR_CYCLES 2
+#endif
 
 uint8_t* allocPsram(size_t size) {
   auto* p = static_cast<uint8_t*>(heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
@@ -70,6 +99,57 @@ void clearFor(RefreshMode mode) {
   }
 }
 
+// LilyGo-EPD47's 1-bpp input takes the leftmost pixel in bit 0; ours is MSB first.
+uint8_t g_bitrev[256];
+void buildBitrev() {
+  for (int i = 0; i < 256; ++i) {
+    uint8_t r = 0;
+    for (int b = 0; b < 8; ++b) r |= ((i >> b) & 1) << (7 - b);
+    g_bitrev[i] = r;
+  }
+}
+
+// Move only the pixels that differ from what the glass shows, both ways, with
+// no clear. Pixels the gray overlay touched count as changed, so anti-aliasing
+// does not linger. Returns false when it cannot run (no known glass state).
+bool fastRefresh(const uint8_t* fb) {
+  if (!g_havePrev || !g_prev || !g_grayMask || !g_toBlack || !g_toWhite) return false;
+  memset(g_toBlack, 0, kMaskBytes);
+  memset(g_toWhite, 0, kMaskBytes);
+  constexpr uint16_t kPanelWb = kPanelW / 8;
+  const uint16_t offXb = g_offX / 8;
+  bool any = false;
+  for (uint16_t y = 0; y < g_h; ++y) {
+    const uint32_t row = static_cast<uint32_t>(y) * g_wb;
+    const uint32_t out = static_cast<uint32_t>(y + g_offY) * kPanelWb + offXb;
+    for (uint16_t bx = 0; bx < g_wb; ++bx) {
+      const uint8_t n = fb[row + bx], p = g_prev[row + bx], g = g_grayMask[row + bx];
+      const uint8_t black = static_cast<uint8_t>(~n & (p | g));
+      const uint8_t white = static_cast<uint8_t>(n & (~p | g));
+      g_toBlack[out + bx] = g_bitrev[black];
+      g_toWhite[out + bx] = g_bitrev[white];
+      any |= (black | white) != 0;
+    }
+  }
+  if (any) {
+    epd_poweron();
+    for (int pass = 0; pass < FREEINK_EPD47_FAST_PASSES; ++pass) {
+      epd_draw_frame_1bit(glass(), g_toBlack, BLACK_ON_WHITE, FREEINK_EPD47_FAST_TIME);
+      epd_draw_frame_1bit(glass(), g_toWhite, WHITE_ON_BLACK, FREEINK_EPD47_FAST_TIME);
+    }
+    epd_poweroff_all();
+  }
+  return true;
+}
+
+// Record fb as what the glass now shows.
+void rememberFrame(const uint8_t* fb) {
+  if (!g_prev || !g_grayMask) return;
+  memcpy(g_prev, fb, static_cast<size_t>(g_wb) * g_h);
+  memset(g_grayMask, 0, static_cast<size_t>(g_wb) * g_h);
+  g_havePrev = true;
+}
+
 }  // namespace
 #endif  // FREEINK_DRIVER_EPD47
 
@@ -94,6 +174,12 @@ void Epd47Driver::begin(EpdBus& bus) {
   const size_t plane = static_cast<size_t>(g_wb) * g_h;
   if (!g_lsb) g_lsb = allocPsram(plane);
   if (!g_msb) g_msb = allocPsram(plane);
+  if (!g_prev) g_prev = allocPsram(plane);
+  if (!g_grayMask) g_grayMask = allocPsram(plane);
+  if (!g_toBlack) g_toBlack = allocPsram(kMaskBytes);
+  if (!g_toWhite) g_toWhite = allocPsram(kMaskBytes);
+  g_havePrev = false;  // the glass is unknown until the first clearing refresh
+  buildBitrev();
   if (g_base) memset(g_base, 0xFF, kPackedBytes);
   epd_init();
 #endif
@@ -106,10 +192,15 @@ void Epd47Driver::display(EpdBus& bus, const uint8_t* fb, const uint8_t* prev, R
 #if FREEINK_DRIVER_EPD47
   if (!g_base || !fb) return;
   fillBase(fb);
+  if (mode == RefreshMode::Fast && fastRefresh(fb)) {
+    rememberFrame(fb);
+    return;
+  }
   epd_poweron();
   clearFor(mode);
   epd_draw_grayscale_image(glass(), g_base);
   epd_poweroff_all();
+  rememberFrame(fb);
 #else
   (void)fb;
   (void)mode;
@@ -150,9 +241,14 @@ void Epd47Driver::writeGrayscalePlaneStrip(EpdBus& bus, GrayPlane plane, const u
 }
 
 // fb is not the page here (the host leaves its last plane in it, see
-// LgfxEpdDriver's overlayCanvasGray). The B/W page is already on the glass, and
-// drawing only darkens, so push an image that is white everywhere except the
-// pixels the planes select: no clear, no flash.
+// LgfxEpdDriver's overlayCanvasGray); the B/W page is already on the glass.
+//
+// Two cases. Anti-aliased text selects pixels the base left white, and drawing
+// only darkens, so an image that is white except the selected pixels goes on
+// top: no clear, no flash. Images are drawn black in the base and lightened by
+// their planes; pushing those back to white leaves them muddy, so the selected
+// area is cleared and the whole composite (base + grays) drawn in one 4-bit
+// pass, which is what gives clean gray levels on this panel.
 void Epd47Driver::displayGray(EpdBus& bus, const uint8_t* fb, bool turnOff, const unsigned char* lut,
                               bool factoryMode) {
   (void)bus;
@@ -161,29 +257,42 @@ void Epd47Driver::displayGray(EpdBus& bus, const uint8_t* fb, bool turnOff, cons
   (void)lut;
   (void)factoryMode;
 #if FREEINK_DRIVER_EPD47
-  if (!g_gray || !g_lsb || !g_msb) return;
+  if (!g_gray || !g_lsb || !g_msb || !g_base) return;
   memset(g_gray, 0xFF, kPackedBytes);
   bool any = false;
+  bool selectsBlack = false;
+  uint16_t x0 = g_w, y0 = g_h, x1 = 0, y1 = 0;  // logical bounds of the selection
   for (uint16_t y = 0; y < g_h; ++y) {
-    const uint8_t* lrow = g_lsb + static_cast<uint32_t>(y) * g_wb;
-    const uint8_t* mrow = g_msb + static_cast<uint32_t>(y) * g_wb;
+    const uint32_t row = static_cast<uint32_t>(y) * g_wb;
     for (uint16_t bx = 0; bx < g_wb; ++bx) {
-      const uint8_t l = lrow[bx], m = mrow[bx];
+      const uint8_t l = g_lsb[row + bx], m = g_msb[row + bx];
       if ((l | m) == 0) continue;
+      if (g_havePrev && g_prev && ((l | m) & ~g_prev[row + bx])) selectsBlack = true;
+      if (bx * 8 < x0) x0 = bx * 8;
+      if (bx * 8 + 7 > x1) x1 = bx * 8 + 7;
+      if (y < y0) y0 = y;
+      y1 = y;
       for (uint8_t bit = 0; bit < 8; ++bit) {
         const uint8_t mask = 0x80 >> bit;
         const bool lb = (l & mask) != 0, mb = (m & mask) != 0;
         if (!lb && !mb) continue;
         const uint8_t level = (mb && !lb) ? kGrayLight : kGrayDark;
         setPixel(g_gray, g_offX + bx * 8 + bit, g_offY + y, level);
-        if (g_base) setPixel(g_base, g_offX + bx * 8 + bit, g_offY + y, level);
+        setPixel(g_base, g_offX + bx * 8 + bit, g_offY + y, level);
+        if (g_grayMask) g_grayMask[row + bx] |= mask;
         any = true;
       }
     }
   }
   if (!any) return;
   epd_poweron();
-  epd_draw_grayscale_image(glass(), g_gray);
+  if (selectsBlack) {
+    const Rect_t area = {.x = g_offX + x0, .y = g_offY + y0, .width = x1 - x0 + 1, .height = y1 - y0 + 1};
+    epd_clear_area_cycles(area, FREEINK_EPD47_IMAGE_CLEAR_CYCLES, 45);
+    epd_draw_grayscale_image(glass(), g_base);
+  } else {
+    epd_draw_grayscale_image(glass(), g_gray);
+  }
   epd_poweroff_all();
 #endif
 }

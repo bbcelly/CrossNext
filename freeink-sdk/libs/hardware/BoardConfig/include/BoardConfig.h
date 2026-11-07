@@ -1228,9 +1228,10 @@ constexpr BoardProfile DE_LINK = {Board::DeLink,
 
 #if FREEINK_LILYGO_EPD47
 // --- LilyGo T5-4.7 E-Paper S3, PLAIN (V2.3/V2.4) as an X4 Pro dev stand-in ---
-// ED047TC1 driven by LilyGo-EPD47 (Epd47Driver). Reports the X4 Pro's 800x480 so
-// layouts match it pixel for pixel; the driver centres that frame on the 960x540
-// glass. No PMIC, gauge, RTC, frontlight or power latch on this board.
+// ED047TC1 driven by LilyGo-EPD47 (Epd47Driver), at the glass's native 960x540.
+// (Report 800x480 instead and the driver centres that frame, matching the X4
+// Pro pixel for pixel, but with a white border.) No PMIC, gauge, RTC,
+// frontlight or power latch on this board.
 // Panel bus (owned by LilyGo-EPD47): D0..D7 = 8,1,2,3,4,5,6,7, CKV 38, STH 40,
 // CKH 41, shift register data 13 / clock 12 / store 0 (BOOT, so BOOT is no button).
 constexpr BoardProfile LILYGO_T5S3 = {
@@ -1238,8 +1239,8 @@ constexpr BoardProfile LILYGO_T5S3 = {
     "lilygo_t5s3_epd47",
     InputStyle::DigitalButtons,
     DisplayController::LgfxEpd,  // raw-parallel class; Epd47Driver is chosen by FREEINK_DRIVER_EPD47
-    800,
-    480,
+    960,
+    540,
     {PIN_UNASSIGNED, PIN_UNASSIGNED, PIN_UNASSIGNED, PIN_UNASSIGNED, PIN_UNASSIGNED, PIN_UNASSIGNED,
      PIN_UNASSIGNED},                            // no SPI display pins
     0,                                           // displaySpiHz n/a (external bus)
@@ -1252,9 +1253,8 @@ constexpr BoardProfile LILYGO_T5S3 = {
     2.0f,
     PIN_UNASSIGNED,  // usbDetect
     // GT911 on SDA18 SCL17 INT47, no reset line wired. Same portrait digitizer as the
-    // Pro (swapXY + flipY). rawMin/Max pick out the centred 800x480 window of the
-    // 960x540 glass, so a tap maps straight to the X4 Pro frame.
-    {TouchController::Gt911, 18, 17, 47, PIN_UNASSIGNED, 0x5D, 80, 879, 30, 509, false, 0x14, false, true,
+    // Pro (swapXY + flipY), covering the whole glass.
+    {TouchController::Gt911, 18, 17, 47, PIN_UNASSIGNED, 0x5D, 0, 959, 0, 539, false, 0x14, false, true,
      PIN_UNASSIGNED, true, false, true, false},  // powerEnable, swapXY, flipX, flipY, hasHomeKey
     NO_FRONTLIGHT,
     NO_AUDIO,
@@ -1264,7 +1264,7 @@ constexpr BoardProfile LILYGO_T5S3 = {
     NO_GAUGE,
     NO_MIC,
     {PIN_UNASSIGNED, PIN_UNASSIGNED, 0, 0, 0, 0, 0, RtcType::None, ImuType::None},
-    1.25f,  // uiScale: same as the X4 Pro, the frame it stands in for
+    1.2f,   // uiScale: as the T5 S3 Pro on the same 960x540 glass
     {},     // no power latch (GPIO2 is panel D2 here)
     0,
     {}};

@@ -12,18 +12,28 @@ does nothing.
    esp_idf_version.h, so the first test reads it as 0 and includes the legacy
    driver/rmt.h while later tests use the IDF 5 rmt_tx.h types. Including the
    version header first makes every test agree.
-3. src/epd_driver.c creates two 8 KB-stack tasks for every frame of a
-   grayscale draw and waits on them forever. Once the reader has opened a book
-   the internal heap no longer has 8 KB contiguous, xTaskCreatePinnedToCore
-   fails silently and the draw hangs (seen on the second screen after boot).
-   The stacks go to PSRAM instead; both tasks only shuffle rows through a
-   queue and never touch flash.
+3. src/epd_driver.c creates two 8 KB-stack tasks in internal RAM for every
+   frame of a grayscale draw and waits on them forever. In this firmware the
+   second draw after boot (Home) hung there; the cause was not pinned down
+   (the internal heap still had a 14 KB block), but with the stacks in PSRAM
+   the draw completes. Both tasks only shuffle rows through a queue and never
+   touch flash. That row queue (64 x 480 B) moves to PSRAM too: in internal
+   RAM it left the JPEG decoder ~4 KB short, so book images failed to decode
+   and showed as black boxes.
+4. src/epd_driver.c: epd_draw_frame_1bit only ever darkens (each set bit
+   becomes the 01 push code, whatever the mode). With WHITE_ON_BLACK it now
+   shifts the codes to 10, the lighten push, so a differential refresh can
+   move pixels both ways without clearing the screen. Its row was also built
+   with the two 8-pixel halves of every 16 swapped, unlike the 4-bpp path
+   that draws correctly on this S3 bus (USER_I2S_REG 0); it now uses the same
+   natural order. Input bit 0 is the leftmost pixel of each byte.
 
 Registered as pre: (so library.json is trimmed before the library finder reads
 it) and post: (to catch a dependency installed during this very build; that
 first build then needs one re-run). Like patch_sdfat.py it touches only this
-env's copy, and only files that hash to the reviewed upstream (pinned commit
-f0ff4a9) or are already patched; anything else fails the build.
+env's copy. A file with none of its edits applied must hash to the reviewed
+upstream (pinned commit f0ff4a9); missing edits are then applied only where
+their anchor occurs exactly once, and anything else fails the build.
 """
 
 import hashlib
@@ -50,8 +60,12 @@ SOURCE_PATCHES = (
          b"                                10, &t2, 1);",
          b"xTaskCreatePinnedToCoreWithCaps((void (*)(void *))feed_display, \"render\", 8192, &p2,\r\n"
          b"                                10, &t2, 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);"),
+        (b"output_queue = xQueueCreate(64, EPD_WIDTH / 2);",
+         b"output_queue = xQueueCreateWithCaps(64, EPD_WIDTH / 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);"),
         (b"vTaskDelete(t1);\r\n        vTaskDelete(t2);",
          b"vTaskDeleteWithCaps(t1);\r\n        vTaskDeleteWithCaps(t2);"),
+        (b"        wide_epd_input[j] = (lut_1bpp[v1] << 16) | lut_1bpp[v2];",
+         b"        wide_epd_input[j] = (lut_1bpp[v1] | (lut_1bpp[v2] << 16)) << (mode == WHITE_ON_BLACK ? 1 : 0);"),
     ]),
 )
 
@@ -77,11 +91,12 @@ def patch_library_json(dependency):
 def patch_source(dependency, relative, upstream, edits):
     path = dependency / relative
     data = path.read_bytes()
-    if all(new in data for _, new in edits):
+    missing = [(old, new) for old, new in edits if new not in data]
+    if not missing:
         return
-    if digest(data) != upstream:
+    if len(missing) == len(edits) and digest(data) != upstream:
         raise RuntimeError("Unrecognized " + LIBRARY + " source: " + relative)
-    for old, new in edits:
+    for old, new in missing:
         if data.count(old) != 1:
             raise RuntimeError(LIBRARY + " patch anchor not unique in " + relative)
         data = data.replace(old, new)
