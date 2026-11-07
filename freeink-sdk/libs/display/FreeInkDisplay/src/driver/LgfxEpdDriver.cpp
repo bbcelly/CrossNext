@@ -393,7 +393,7 @@ void LgfxEpdDriver::deepSleep(EpdBus& bus) {
 // -DFREEINK_LGFX_EPD_CONFIG=yourConfig. The SDK's board-support libraries provide
 // the default configs for FREEINK_DEVICE_LILYGO (BoardT5S3) and
 // FREEINK_DEVICE_PAPERS3 (BoardPaperS3) builds.
-#if FREEINK_DEVICE_LILYGO
+#if FREEINK_DEVICE_LILYGO && FREEINK_DRIVER_LGFX_EPD
 const LgfxEpdConfig& lilygoT5S3LgfxConfig();
 PanelDriver& lgfxEpdDriver() {
   static LgfxEpdDriver instance(lilygoT5S3LgfxConfig());

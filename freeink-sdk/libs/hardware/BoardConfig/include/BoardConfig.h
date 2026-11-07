@@ -174,10 +174,21 @@
 // LilyGo T5 S3 and M5Stack PaperS3: raw-parallel ED047TC1 via LovyanGFX (M5GFX).
 // External-bus driver; each board injects its own bus pins/power in an
 // LgfxEpdConfig (PaperS3's rails are plain GPIOs, LilyGo's ride a PMIC+expander).
-#if FREEINK_DEVICE_LILYGO || FREEINK_DEVICE_PAPERS3
+// FREEINK_LILYGO_EPD47 picks the PLAIN T5-4.7 S3 (V2.3/V2.4) instead of the
+// Pro/Lite: same glass, but its control lines ride a 74HCT4094 shift register
+// that only LilyGo's own LilyGo-EPD47 library drives (Epd47Driver).
+#ifndef FREEINK_LILYGO_EPD47
+#define FREEINK_LILYGO_EPD47 0
+#endif
+#if (FREEINK_DEVICE_LILYGO && !FREEINK_LILYGO_EPD47) || FREEINK_DEVICE_PAPERS3
 #define FREEINK_DRIVER_LGFX_EPD 1
 #else
 #define FREEINK_DRIVER_LGFX_EPD 0
+#endif
+#if FREEINK_DEVICE_LILYGO && FREEINK_LILYGO_EPD47
+#define FREEINK_DRIVER_EPD47 1
+#else
+#define FREEINK_DRIVER_EPD47 0
 #endif
 // M5Paper v1.1: ED047TC1 behind an IT8951E timing controller (its own framebuffer
 // SRAM, 16-bit-word SPI with MISO reads). The driver owns its SPI end to end.
@@ -1215,6 +1226,49 @@ constexpr BoardProfile DE_LINK = {Board::DeLink,
                                   {39, 40, 38, 48, 42, 41, 4},  // SDMMC 4-bit: CLK39 CMD40 D0=38 D1=48 D2=42 D3=41
                                   NO_GAUGE};
 
+#if FREEINK_LILYGO_EPD47
+// --- LilyGo T5-4.7 E-Paper S3, PLAIN (V2.3/V2.4) as an X4 Pro dev stand-in ---
+// ED047TC1 driven by LilyGo-EPD47 (Epd47Driver). Reports the X4 Pro's 800x480 so
+// layouts match it pixel for pixel; the driver centres that frame on the 960x540
+// glass. No PMIC, gauge, RTC, frontlight or power latch on this board.
+// Panel bus (owned by LilyGo-EPD47): D0..D7 = 8,1,2,3,4,5,6,7, CKV 38, STH 40,
+// CKH 41, shift register data 13 / clock 12 / store 0 (BOOT, so BOOT is no button).
+constexpr BoardProfile LILYGO_T5S3 = {
+    Board::LilyGoT5S3,
+    "lilygo_t5s3_epd47",
+    InputStyle::DigitalButtons,
+    DisplayController::LgfxEpd,  // raw-parallel class; Epd47Driver is chosen by FREEINK_DRIVER_EPD47
+    800,
+    480,
+    {PIN_UNASSIGNED, PIN_UNASSIGNED, PIN_UNASSIGNED, PIN_UNASSIGNED, PIN_UNASSIGNED, PIN_UNASSIGNED,
+     PIN_UNASSIGNED},                            // no SPI display pins
+    0,                                           // displaySpiHz n/a (external bus)
+    {11, 16, 15, 42, PIN_UNASSIGNED, false, 0},  // SD over SPI: SCLK11 MISO16 MOSI15 CS42
+    // Only GPIO21 (top key) is a free button; it pages forward like the X4 Pro's right key.
+    // {back, confirm, left, right, up, down, power, powerActiveHigh}
+    {PIN_UNASSIGNED, PIN_UNASSIGNED, PIN_UNASSIGNED, PIN_UNASSIGNED, PIN_UNASSIGNED, 21, PIN_UNASSIGNED, false},
+    14,              // batteryAdc: GPIO14 through a 1:2 divider
+    PIN_UNASSIGNED,  // batteryChargeStatus
+    2.0f,
+    PIN_UNASSIGNED,  // usbDetect
+    // GT911 on SDA18 SCL17 INT47, no reset line wired. Same portrait digitizer as the
+    // Pro (swapXY + flipY). rawMin/Max pick out the centred 800x480 window of the
+    // 960x540 glass, so a tap maps straight to the X4 Pro frame.
+    {TouchController::Gt911, 18, 17, 47, PIN_UNASSIGNED, 0x5D, 80, 879, 30, 509, false, 0x14, false, true,
+     PIN_UNASSIGNED, true, false, true, false},  // powerEnable, swapXY, flipX, flipY, hasHomeKey
+    NO_FRONTLIGHT,
+    NO_AUDIO,
+    NO_LEDS,
+    NO_FLIP,
+    NO_SDMMC,
+    NO_GAUGE,
+    NO_MIC,
+    {PIN_UNASSIGNED, PIN_UNASSIGNED, 0, 0, 0, 0, 0, RtcType::None, ImuType::None},
+    1.25f,  // uiScale: same as the X4 Pro, the frame it stands in for
+    {},     // no power latch (GPIO2 is panel D2 here)
+    0,
+    {}};
+#else
 // --- LilyGo T5 S3 4.7" (ED047TC1 raw-parallel EPD) — ESP32-S3 -----------------
 // 960x540 16-gray raw parallel panel driven via LovyanGFX (FREEINK_DRIVER_LGFX_EPD);
 // the panel can't power up without the board's PMIC (TPS65185) + PCA9535 expander
@@ -1266,6 +1320,7 @@ constexpr BoardProfile LILYGO_T5S3 = {
     // read. Measured by eye on hardware in two passes (3 -> 6 -> 8); top/bottom
     // are correct at the defaults. Compare the X4 Pro's 7px sides.
     {9, 8, 3, 8}};
+#endif
 
 // --- M5Paper v1.1 4.7" (ED047TC1 behind an IT8951E controller) — ESP32 --------
 // 540x960 16-gray panel driven through an IT8951E timing controller over SPI
