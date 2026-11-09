@@ -514,8 +514,28 @@ void InputManager::updateConfirmPowerHold(const unsigned long currentTime) {
   }
 }
 
+#if FREEINK_LILYGO_EPD47
+// Defined by FastEpd47Driver: true while a refresh clocks the panel's shift
+// register, whose STR line is GPIO0, the BOOT key.
+extern "C" bool freeink_epd_strobe_busy() __attribute__((weak));
+#endif
+
 void InputManager::updateDigitalTwoButton(const unsigned long currentTime) {
-  const bool up = isDigitalPressed(BoardConfig::ACTIVE.input.up);
+  bool up = isDigitalPressed(BoardConfig::ACTIVE.input.up);
+#if FREEINK_LILYGO_EPD47
+  // Plain LilyGo T5-4.7 S3: "up" is GPIO0, also the register strobe, and this
+  // style has no debounce, so one sample caught mid-strobe is a BOOT tap (which
+  // repaints, which strobes again). Hold the last state while a refresh runs;
+  // otherwise confirm a press a strobe's length later.
+  if (BoardConfig::ACTIVE.input.up == 0) {
+    if (freeink_epd_strobe_busy && freeink_epd_strobe_busy()) {
+      up = (twoButtonPhysicalState & 1u) != 0;
+    } else if (up) {
+      esp_rom_delay_us(5);
+      up = isDigitalPressed(0);
+    }
+  }
+#endif
   const bool down = isDigitalPressed(BoardConfig::ACTIVE.input.down);
   const uint8_t physical = static_cast<uint8_t>((up ? 1u : 0u) | (down ? 2u : 0u));
   uint8_t auxiliaryState = serviceTouch();

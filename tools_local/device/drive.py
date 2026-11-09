@@ -66,8 +66,8 @@ MAX_FRAME_BYTES = 1 << 20
 # live in different languages in the same branch; this one has to be the larger.
 GRACE_S = 5.0
 
-PANEL_W = 800
-PANEL_H = 480
+# The LilyGo EPD47 env runs native 960x540: DRIVE_PANEL=960x540.
+PANEL_W, PANEL_H = (int(v) for v in os.environ.get("DRIVE_PANEL", "800x480").split("x"))
 
 # Serial-bridge-only verbs: they touch the SD card, the heap or the chip, none
 # of which Developer Mode exposes over HTTP.

@@ -185,10 +185,20 @@
 #else
 #define FREEINK_DRIVER_LGFX_EPD 0
 #endif
-#if FREEINK_DEVICE_LILYGO && FREEINK_LILYGO_EPD47
+// FREEINK_EPD47_FASTEPD picks FastEPD (FastEpd47Driver) over LilyGo-EPD47
+// (Epd47Driver) for the same board.
+#ifndef FREEINK_EPD47_FASTEPD
+#define FREEINK_EPD47_FASTEPD 0
+#endif
+#if FREEINK_DEVICE_LILYGO && FREEINK_LILYGO_EPD47 && !FREEINK_EPD47_FASTEPD
 #define FREEINK_DRIVER_EPD47 1
 #else
 #define FREEINK_DRIVER_EPD47 0
+#endif
+#if FREEINK_DEVICE_LILYGO && FREEINK_LILYGO_EPD47 && FREEINK_EPD47_FASTEPD
+#define FREEINK_DRIVER_EPD47_FASTEPD 1
+#else
+#define FREEINK_DRIVER_EPD47_FASTEPD 0
 #endif
 // M5Paper v1.1: ED047TC1 behind an IT8951E timing controller (its own framebuffer
 // SRAM, 16-bit-word SPI with MISO reads). The driver owns its SPI end to end.

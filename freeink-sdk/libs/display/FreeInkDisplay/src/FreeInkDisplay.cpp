@@ -53,6 +53,9 @@
 #if FREEINK_DRIVER_EPD47
 #include "driver/Epd47Driver.h"
 #endif
+#if FREEINK_DRIVER_EPD47_FASTEPD
+#include "driver/FastEpd47Driver.h"
+#endif
 #if FREEINK_DRIVER_IT8951
 #include "driver/It8951Driver.h"
 #endif
@@ -185,6 +188,8 @@ void FreeInkDisplay::selectDriver() {
       _driver = &lgfxEpdDriver();
 #elif FREEINK_DRIVER_EPD47
       _driver = &epd47Driver();
+#elif FREEINK_DRIVER_EPD47_FASTEPD
+      _driver = &fastEpd47Driver();
 #elif FREEINK_DRIVER_IT8951
       _driver = &it8951Driver();
 #endif
