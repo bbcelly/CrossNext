@@ -6,7 +6,10 @@
 
 #if FREEINK_DRIVER_EPD47_FASTEPD
 #include <FastEPD.h>
+#include <driver/gpio.h>
 #include <esp_heap_caps.h>
+#include <esp_rom_gpio.h>
+#include <soc/gpio_sig_map.h>
 #endif
 
 namespace freeink {
@@ -69,6 +72,87 @@ volatile bool g_strobeBusy = false;
 struct StrobeBusy {
   StrobeBusy() { g_strobeBusy = true; }
   ~StrobeBusy() { g_strobeBusy = false; }
+};
+
+// The 74HCT4094 that switches the panel's power. FastEPD keeps its own copy of
+// the byte and rewrites all of it on every change, so a value written here
+// lasts until the library's next write. Bit 7 goes first, as in
+// bbepSendShiftData(). Data and clock are left low so neither line has to
+// decay through the input threshold once the pads float in deep sleep.
+// Pins as in FastEPD's BB_PANEL_LILYGO_T5S3: data 13, clock 12, store 0.
+void shiftRegisterWrite(uint8_t value) {
+  constexpr gpio_num_t kData = GPIO_NUM_13;
+  constexpr gpio_num_t kClock = GPIO_NUM_12;
+  constexpr gpio_num_t kStore = GPIO_NUM_0;
+  gpio_set_level(kStore, 0);
+  for (int i = 0; i < 8; ++i) {
+    gpio_set_level(kClock, 0);
+    gpio_set_level(kData, (value & 0x80) ? 1 : 0);
+    value = static_cast<uint8_t>(value << 1);
+    gpio_set_level(kClock, 1);
+  }
+  gpio_set_level(kClock, 0);
+  gpio_set_level(kData, 0);
+  gpio_set_level(kStore, 1);  // open-drain: the pull-up raises it
+  delayMicroseconds(2);
+}
+
+// Every output low: the state LilyGo-EPD47 leaves the register in with
+// epd_poweroff_all(). einkPower(0) stops at 0x22 (kRegisterIdle), which keeps
+// the board's power enable (0x20) on.
+void shiftRegisterAllOff() { shiftRegisterWrite(0x00); }
+constexpr uint8_t kRegisterIdle = 0x22;
+
+// What the panel costs while nothing is being drawn, measured 2026-11-17 on a
+// USB meter (battery disconnected):
+//  - With the register off, the panel still took about 49 mA through three
+//    pins that idle high: the write clock and STH (GPIO 41, 40; 31 mA) and CKV
+//    (GPIO 38; 18 mA). The data lines took nothing. Parking those three low
+//    before deep sleep brought the sleeping reader from 10-11 mA to under 2.
+//  - Awake, parking the pins alone changed nothing (77 mA): the register still
+//    held 0x22, so the panel drew the same from its own supply. Switching the
+//    register off alone had changed nothing either (the pins took over).
+// So between refreshes both go: the register to zero and the three pins low.
+// PanelBus undoes that for one update: register back to what FastEPD expects,
+// a pause for the supply to come up, 41 and 40 back to the LCD peripheral.
+// FREEINK_EPD47_BUS_IDLE_LOW parks the pins, FREEINK_EPD47_IDLE_ZERO zeroes the
+// register; the pause is FREEINK_EPD47_POWER_SETTLE_MS.
+#ifndef FREEINK_EPD47_IDLE_ZERO
+#define FREEINK_EPD47_IDLE_ZERO 1
+#endif
+#ifndef FREEINK_EPD47_BUS_IDLE_LOW
+#define FREEINK_EPD47_BUS_IDLE_LOW 1
+#endif
+#ifndef FREEINK_EPD47_POWER_SETTLE_MS
+#define FREEINK_EPD47_POWER_SETTLE_MS 10
+#endif
+void panelBusPark() {
+#if FREEINK_EPD47_BUS_IDLE_LOW
+  gpio_set_level(GPIO_NUM_38, 0);
+  gpio_set_level(GPIO_NUM_41, 0);
+  gpio_set_level(GPIO_NUM_40, 0);
+  esp_rom_gpio_connect_out_signal(GPIO_NUM_41, SIG_GPIO_OUT_IDX, false, false);
+  esp_rom_gpio_connect_out_signal(GPIO_NUM_40, SIG_GPIO_OUT_IDX, false, false);
+#endif
+}
+void panelIdle() {
+#if FREEINK_EPD47_IDLE_ZERO
+  shiftRegisterAllOff();
+#endif
+  panelBusPark();
+}
+struct PanelBus {
+  PanelBus() {
+#if FREEINK_EPD47_IDLE_ZERO
+    shiftRegisterWrite(kRegisterIdle);
+    delay(FREEINK_EPD47_POWER_SETTLE_MS);
+#endif
+#if FREEINK_EPD47_BUS_IDLE_LOW
+    esp_rom_gpio_connect_out_signal(GPIO_NUM_41, LCD_PCLK_IDX, false, false);
+    esp_rom_gpio_connect_out_signal(GPIO_NUM_40, LCD_DC_IDX, false, false);
+#endif
+  }
+  ~PanelBus() { panelIdle(); }
 };
 
 uint16_t g_w = 0, g_h = 0, g_wb = 0;  // logical frame
@@ -159,6 +243,7 @@ bool partial(const uint8_t* fb) {
   }
   g_epd.setPreviousMode(BB_MODE_1BPP);  // no conversion of the plane we just built
   StrobeBusy busy;
+  PanelBus panelBus;
   return g_epd.partialUpdate(false) == BBEP_SUCCESS;
 }
 
@@ -167,6 +252,7 @@ void full(const uint8_t* fb, RefreshMode mode) {
   if (!use1bpp()) return;
   place1(g_epd.currentBuffer(), fb);
   StrobeBusy busy;
+  PanelBus panelBus;
   g_epd.fullUpdate(mode == RefreshMode::Full ? CLEAR_SLOW : CLEAR_FAST, false);
 }
 
@@ -218,6 +304,7 @@ void grayUpdate(const uint8_t* base, int clear, BB_RECT* box) {
   if (!use4bpp()) return;
   buildTransitions(base, clear != CLEAR_NONE);
   StrobeBusy busy;
+  PanelBus panelBus;
   g_epd.fullUpdate(clear, false, box);
 }
 
@@ -253,7 +340,10 @@ void FastEpd47Driver::begin(EpdBus& bus) {
     // buffers, and a later setPanelSize() would be refused.
     StrobeBusy busy;
     g_ready = g_epd.initPanel(BB_PANEL_LILYGO_T5S3) == BBEP_SUCCESS && g_epd.setMode(BB_MODE_1BPP) == BBEP_SUCCESS;
-    if (g_ready) g_epd.setPasses(kFull);
+    if (g_ready) {
+      g_epd.setPasses(kFull);
+      panelIdle();
+    }
   }
 #endif
 }
@@ -395,6 +485,8 @@ void FastEpd47Driver::deepSleep(EpdBus& bus) {
   if (g_ready) {
     StrobeBusy busy;
     g_epd.einkPower(0);
+    shiftRegisterAllOff();
+    panelBusPark();
   }
 #endif
 }

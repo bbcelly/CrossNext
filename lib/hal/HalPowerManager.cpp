@@ -73,8 +73,10 @@ void HalPowerManager::setPowerSaving(bool enabled) {
 
 [[noreturn]] void HalPowerManager::startDeepSleep(HalGPIO& gpio, const uint64_t timerWakeMicros) const {
   Frontlight.prepareForDeepSleep();
-#if FREEINK_DEVICE_EEGO_A4
+#if FREEINK_DEVICE_EEGO_A4 || FREEINK_GT911_SLEEP
   // LM3630A and GSL share I2C; turn the light off before touch releases the bus.
+  // FREEINK_GT911_SLEEP: boards with no reset line to the GT911 send it its
+  // sleep command here, or it keeps scanning through deep sleep.
   gpio.prepareForDeepSleep();
 #endif
 #ifdef ENABLE_SERIAL_LOG

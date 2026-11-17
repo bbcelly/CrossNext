@@ -250,6 +250,33 @@ bool InputManager::prepareForDeepSleep() {
     return ok;
   }
 #endif
+#if FREEINK_GT911_SLEEP && FREEINK_CAP_TOUCH
+  // Off unless the env passes -DFREEINK_GT911_SLEEP=1. A GT911 with no reset
+  // line and an always-on supply keeps scanning through deep sleep: on the
+  // plain LilyGo T5-4.7 S3 the sleeping board stepped from about 15 to 19 mA on
+  // a touch (USB meter, 2026-11-17), and 3 to 6 mA went away with this.
+  // Datasheet sleep entry: INT low, then command 0x05 to 0x8040. INT is held
+  // low for the night; a high level on it is what wakes the controller, see
+  // beginGt911().
+  {
+    const auto& t = BoardConfig::ACTIVE.touch;
+    if (t.controller == BoardConfig::TouchController::Gt911 && t.reset < 0 && t.irq >= 0 && gt911Addr != 0) {
+      touchDataEnabled = false;  // stops the poller before the bus is used here
+      const auto irq = static_cast<gpio_num_t>(t.irq);
+      gpio_hold_dis(irq);
+      pinMode(t.irq, OUTPUT);
+      digitalWrite(t.irq, LOW);
+      delay(1);
+      Wire.beginTransmission(gt911Addr);
+      Wire.write(static_cast<uint8_t>(0x80));
+      Wire.write(static_cast<uint8_t>(0x40));
+      Wire.write(static_cast<uint8_t>(0x05));
+      const bool ok = Wire.endTransmission() == 0;
+      gpio_hold_en(irq);
+      return ok;
+    }
+  }
+#endif
   return true;
 }
 
@@ -2073,11 +2100,31 @@ void InputManager::beginGt911() {
   // try the primary-select level first, then the alternate level before
   // declaring the touch controller absent.
   gt911Addr = 0;
+#if FREEINK_GT911_SLEEP
+  // Counterpart of the sleep command in prepareForDeepSleep(): with no reset
+  // line, a high level on INT (2 to 5 ms per the datasheet) is the only way out
+  // of the GT911's sleep mode. The pad hold from the sleep path goes first.
+  if (t.reset < 0 && t.irq >= 0) {
+    gpio_hold_dis(static_cast<gpio_num_t>(t.irq));
+    pinMode(t.irq, OUTPUT);
+    digitalWrite(t.irq, HIGH);
+    delay(5);
+    pinMode(t.irq, INPUT);
+    delay(50);
+  }
+#endif
   resetWithIntLevel(LOW);
   if (!probeCandidates()) {
     resetWithIntLevel(HIGH);
     probeCandidates();
   }
+#if FREEINK_GT911_SLEEP
+  // A controller coming out of sleep may not answer at once; give it a second.
+  for (int i = 0; gt911Addr == 0 && t.reset < 0 && i < 10; ++i) {
+    delay(100);
+    probeCandidates();
+  }
+#endif
 
   touchDataEnabled = (gt911Addr != 0);
 #ifdef TOUCH_PROBE_DEBUG
