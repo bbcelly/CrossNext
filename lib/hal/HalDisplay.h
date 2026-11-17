@@ -58,6 +58,9 @@ class HalDisplay {
   void displayBufferAsync(RefreshMode mode = RefreshMode::FAST_REFRESH);
   // Block until a pending deferred refresh completes (no-op when none is).
   void waitRefreshComplete();
+  // Panel updates requested since boot, in any mode. A cheap measure of how
+  // busy the glass was, for logs that price battery use.
+  static uint32_t refreshCount();
   // True when displayBufferAsync() genuinely overlaps (panel driver defers);
   // false where it falls back to a blocking refresh.
   bool supportsAsyncRefresh() const;

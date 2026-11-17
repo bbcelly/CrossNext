@@ -44,6 +44,7 @@
 #include "activities/settings/SdFirmwareUpdateActivity.h"
 #include "apps_local/Shelf.h"
 #include "apps_local/power/PowerButtonPolicy.h"
+#include "apps_local/batterylog/BatteryLog.h"
 #include "apps_local/power/PowerMenuActivity.h"
 #include "apps_local/powerprobe/PowerProbe.h"
 #include "apps_local/words/DictionaryDefaults.h"
@@ -496,6 +497,7 @@ void enterDeepSleep(bool fromTimeout = false, bool unattended = false) {
   halTiltSensor.deepSleep();
   display.deepSleep();
   powerprobe::beforeSleep();
+  batterylog::beforeSleep();
   Storage.prepareForDeepSleep();
   LOG_DBG("MAIN", "Entering deep sleep");
 
@@ -664,6 +666,11 @@ void setup() {
   // Prices the sleep we just came out of, if there was one. Reads the gauge,
   // appends a line, clears the mark; silent when there is nothing to price.
   powerprobe::afterBoot();
+  batterylog::afterBoot(wakeupReason == HalGPIO::WakeupReason::PowerButton     ? "boot_button"
+                        : wakeupReason == HalGPIO::WakeupReason::Timer         ? "boot_timer"
+                        : wakeupReason == HalGPIO::WakeupReason::AfterFlash    ? "boot_flash"
+                        : wakeupReason == HalGPIO::WakeupReason::AfterUSBPower ? "boot_usb"
+                                                                               : "boot_other");
 
   HalSystem::checkPanic();
 
@@ -756,6 +763,7 @@ void setup() {
       if (!powermenu::acceptsWake(static_cast<powermenu::WakeMode>(SETTINGS.powerWakeMode), wakeHoldVerified)) {
         LOG_DBG("MAIN", "Power-button wake not held through verification, sleeping");
         powerprobe::beforeSleep();
+        batterylog::beforeSleep();
         Storage.prepareForDeepSleep();
         startDeepSleepArmed(resleepTimerMicros());
       }
@@ -767,6 +775,7 @@ void setup() {
       unattendedWakeMagic = UNATTENDED_WAKE_MAGIC;
       LOG_DBG("MAIN", "Timer wake: returning to sleep");
       powerprobe::beforeSleep();
+      batterylog::beforeSleep();
       Storage.prepareForDeepSleep();
       startDeepSleepArmed(kTimerWakeMicros);
       break;
@@ -788,6 +797,7 @@ void setup() {
       break;
 #else
       powerprobe::beforeSleep();
+      batterylog::beforeSleep();
       Storage.prepareForDeepSleep();
       startDeepSleepArmed(resleepTimerMicros());
       break;
@@ -1016,6 +1026,7 @@ void loop() {
   }
 
   halTiltSensor.update(SETTINGS.tiltPageTurn, SETTINGS.orientation, activityManager.isReaderActivity());
+  batterylog::tick(activityManager.isReaderActivity());
 
   // Under the render lock, so a step never overlaps the themes' gauge reads.
   static bool gaugeCapacityPending = true;
