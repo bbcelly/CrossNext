@@ -1,0 +1,143 @@
+name: CrossNext desktop packages
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  engine:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install preparation build dependencies
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install platformio pillow pyyaml brotli fonttools freetype-py zopfli
+          git clone --depth 1 https://github.com/emscripten-core/emsdk.git .venv/emsdk
+          .venv/emsdk/emsdk install 6.0.6
+          .venv/emsdk/emsdk activate 6.0.6
+      - name: Build matching firmware preparation engine
+        run: .venv/bin/python tools_local/build_preparer_ci.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: preparation-engine
+          path: desktop-preparer/dist/runtime/
+          if-no-files-found: error
+          retention-days: 7
+  macos:
+    needs: engine
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+            native: arm64
+          - runner: macos-15-intel
+            arch: x64
+            native: x86_64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@v4
+        with:
+          name: preparation-engine
+          path: desktop-preparer/dist/runtime/
+      - name: Package native macOS disk image
+        working-directory: desktop-preparer
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          npm ci
+          node tests/cache-cleaner.cjs
+          npm run stage
+          npx electron-builder --mac dmg --${{ matrix.arch }}
+      - name: Verify disk images and app versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = "${{ matrix.native }}"
+          for disk in desktop-preparer/dist/desktop/*.dmg; do
+            hdiutil verify "$disk"
+            mount="$RUNNER_TEMP/crossnext-dmg"
+            mkdir -p "$mount"
+            hdiutil attach -readonly -nobrowse -mountpoint "$mount" "$disk"
+            app=$(find "$mount" -maxdepth 1 -name '*.app' -print -quit)
+            test -n "$app"
+            test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$app/Contents/Info.plist")" = "$(node -p "require('./desktop-preparer/package.json').version")"
+            test -f "$app/Contents/Resources/runtime/engine.wasm"
+            cmp "$app/Contents/Resources/runtime/engine.wasm" desktop-preparer/dist/runtime/engine.wasm
+            executable="$app/Contents/MacOS/CrossNext Book Preparer"
+            architecture=$(lipo -archs "$executable")
+            echo "$architecture"
+            test "$architecture" = "$(uname -m)"
+            ELECTRON_RUN_AS_NODE=1 "$executable" -p 'process.platform + ":" + process.arch'
+            (
+              cd desktop-preparer
+              CROSSNEXT_PACKAGED_EXECUTABLE="$executable" \
+              CROSSNEXT_PACKAGED_RUNTIME="$app/Contents/Resources/runtime" \
+              CROSSNEXT_TEST_PYTHON=python3 node tests/packaged.cjs
+              CROSSNEXT_PACKAGED_EXECUTABLE="$executable" \
+              CROSSNEXT_TEST_PYTHON=python3 node tests/cache-ui.cjs
+            )
+            hdiutil detach "$mount"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CrossNext-Book-Preparer-macOS-${{ matrix.arch }}
+          path: desktop-preparer/dist/desktop/*.dmg
+          if-no-files-found: error
+          retention-days: 14
+  windows:
+    needs: engine
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: preparation-engine
+          path: desktop-preparer/dist/runtime/
+      - name: Package Windows executable
+        working-directory: desktop-preparer
+        run: |
+          npm ci
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm run dist:win
+      - name: Verify packaged preparation and storage controls
+        working-directory: desktop-preparer
+        run: |
+          node tests/cache-cleaner.cjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node tests/packaged.cjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:CROSSNEXT_PACKAGED_EXECUTABLE = Join-Path (Get-Location) 'dist/desktop/win-unpacked/CrossNext Book Preparer.exe'
+          node tests/cache-ui.cjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CrossNext-Book-Preparer-Windows
+          path: desktop-preparer/dist/desktop/*.exe
+          if-no-files-found: error
+          retention-days: 14

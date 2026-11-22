@@ -14,7 +14,7 @@ Reading separates text, reading behaviour, dictionaries and the status bar.
 **Statistics tracking** selects which file formats contribute reading statistics; it does not control which formats can be opened.
 Library groups files, finished books and cache maintenance. Controls separates
 buttons, touch, haptics where fitted, and keyboard layouts. Connectivity contains
-Wi-Fi, reading sync and OPDS. System contains Home, language, sleep and the clock
+Wi-Fi, Bluetooth, reading sync and OPDS. System contains Home, language, sleep and the clock
 when the device has one. Device contains firmware, extensions, information and
 developer mode. Hardware-specific options remain conditional on the device.
 The settings registry, JSON keys and existing actions are unchanged. Firmware
@@ -52,15 +52,15 @@ No device build, flashing or hardware verification is implied by browser checks.
 The picker marks the assigned shortcut with a checkmark. An underline follows
 navigation without making another shortcut look enabled.
 
-Display > Quick settings assigns four shortcuts from Night mode, Refresh, Rotate, Light, Warm, Wi-Fi, Lock screen, Sleep, Power off and Restart. Existing shortcut identifiers are preserved; the duplicate-assignment check now covers all ten choices. Lock screen keeps the existing sleep behavior and uses an outlined padlock. Sleep, Power off and Restart persist changed light preferences and use the shared power request flow, which flushes reader state and prepares storage before sleeping or restarting. They add no separate power owner or background task.
+Display > Quick settings assigns four shortcuts from Night mode, Refresh, Rotate, Light, Warm, Wi-Fi, Bluetooth, Lock screen, Sleep, Power off and Restart. Existing shortcut identifiers are preserved; the duplicate-assignment check covers all eleven choices. Lock screen keeps the existing sleep behavior and uses an outlined padlock. Sleep, Power off and Restart persist changed light preferences and use the shared power request flow, which flushes reader state and prepares storage before sleeping or restarting. They add no separate power owner or background task.
 
 The leading light and warmth icons also toggle those controls directly. Light off displays 0% brightness; turning it on restores the preceding brightness. Warm off displays 0% warmth; turning it on restores the remembered positive warmth. The icons and checked state follow the active setting.
 
-Bluetooth is omitted: the bundled SDK has an optional BLE HID host, but `FREEINK_CAP_BLE_HID_HOST` defaults to zero and these firmware configurations do not enable or integrate its pairing/input flow. A hardware radio alone does not provide a usable Bluetooth shortcut.
+The X4 Pro release enables the BLE HID host. Connectivity > Bluetooth opens scanning, pairing and remote-button mapping. The Bluetooth quick-settings tile toggles the saved opt-in; radio ownership still yields to Wi-Fi, exclusive storage and deep sleep. See [Bluetooth controls](bluetooth-controls.txt) for supported actions and device checks.
 
 ## Wi-Fi and clock
 
-Open Connectivity → Wi-Fi to scan the available networks. Select a protected network, tap its password field to enter the password, and choose Connect. Show password controls visibility on the review screen; leaving that screen hides it again. Saved credentials retain their existing connection behavior.
+Open Connectivity → Wi-Fi to scan the available networks. Select a protected network, tap its password field to enter the password, and choose Connect. Show password controls visibility both on the review screen and while editing. Confirming the keyboard returns its chosen visibility with the password; cancelling preserves the previous password and visibility. A new password prompt starts hidden. Saved credentials retain their existing connection behavior.
 
 While connected, select the current network to see its signal, protection, IP and MAC address. If an existing connection is absent from the scan, protection stays unknown (shown as “--” and a question mark) until it is observed; the UI does not assume an open network. Disconnect ends the current connection and keeps its saved password. Forget network asks for confirmation, removes that network's saved password and ends its current connection. Returning to Settings or closing the control center preserves the live Wi-Fi on/off state. An enabled radio continues using power and driver memory until switched off or an existing shutdown boundary applies. Sleep, restart and other network apps keep their existing connection lifecycle; enabling Wi-Fi does not add automatic connection on wake.
 
@@ -78,7 +78,7 @@ Framed and Carousel use square controls in their menus and reader sheets. Older 
 
 System → Clock → Show in header enables a fixed, larger clock in shared app headers, including Solitaire and Hearts. Titles, navigation buttons and battery status take precedence: the clock is omitted when its complete text cannot fit. It follows the selected 12/24-hour format and updates when that screen repaints; Home retains its dedicated clock and minute updates. Turning the optional clock or battery percentage off clears it on the next repaint.
 
-The device and web settings lists omit legacy theme selection and touch-inapplicable power/menu controls. Their saved keys remain compatible with existing settings files. Appearance offers Framed, Carousel, Carousel 2 and Bookshelf; Home-button gestures are configured in Controls. Frontlight and tilt options depend on the hardware capabilities.
+The device and web settings lists omit legacy theme selection and touch-inapplicable power/menu controls. Their saved keys remain compatible with existing settings files. Appearance offers Framed, Carousel, Carousel 2 and Bookshelf; Home double-tap and long-press gestures are configured in Controls. A single Home tap is fixed to Home, including when older settings assigned it another action. Frontlight and tilt options depend on the hardware capabilities.
 
 The reader's Contents and More lists both accept horizontal swipes between available list pages. Swiping at either end stays on that list page and does not turn the book underneath. A downward swipe closes the sheet.
 

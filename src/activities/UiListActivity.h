@@ -19,6 +19,7 @@ class UiListActivity : public Activity, protected UiAppHost {
   void onEnter() override;
   void loop() override;
   void render(RenderLock&&) override;
+  bool allowsRemoteControl() const override { return true; }
 
  protected:
   // Base-owned row action; subclass-registered actions start at ACTION_USER.
@@ -74,7 +75,8 @@ class UiListActivity : public Activity, protected UiAppHost {
   // selectionOffset reserves leading ring entries such as the tab bar.
   void useCompactSettingsRows();
   bool compactSettingsRows = false;
-  void syncListViewport(UiScreen& screen, freeink::ui::ListProps& props, int selectionOffset = 0);
+  void syncListViewport(UiScreen& screen, freeink::ui::ListProps& props, int selectionOffset = 0,
+                        bool reserveTrailing = false);
   // Move the selection to index and pull the viewport to it.
   void moveSelectionTo(int index);
 

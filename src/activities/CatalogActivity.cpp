@@ -66,14 +66,16 @@ void CatalogActivity::launchWifiSelection() {
   requestUpdate();
   startActivityForResult(std::move(wifi), [this](const ActivityResult& result) {
     if (result.isCancelled)
-      fail(StrId::STR_WIFI_CONN_FAILED);
+      wifiSelectionCancelled();
     else
       startBrowse();
   });
 }
 
+void CatalogActivity::wifiSelectionCancelled() { fail(StrId::STR_WIFI_CONN_FAILED); }
+
 void CatalogActivity::launchSearch() {
-  auto keyboard = makeUniqueNoThrow<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_SEARCH));
+  auto keyboard = makeUniqueNoThrow<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_SEARCH), searchPrefill());
   if (!keyboard) {
     LOG_ERR("CAT", "OOM: search keyboard");
     fail(StrId::STR_MEMORY_ERROR);
@@ -210,11 +212,10 @@ void CatalogActivity::screenHeader(UiScreen& screen, const char* title) {
                       search ? ACTION_SEARCH : freeink::ui::NO_ACTION);
 }
 
-bool CatalogActivity::buildStatusScreen(UiScreen& screen, const bool boldError, const bool showDownloadTotal) {
+bool CatalogActivity::buildStatusScreen(UiScreen& screen, const bool boldError) {
   switch (state) {
     case State::DOWNLOADING:
-      catalogDownloadScreen(screen, statusMessage.c_str(), downloadProgress, showDownloadTotal ? downloadTotal : 0,
-                            ACTION_CANCEL);
+      catalogDownloadScreen(screen, statusMessage.c_str(), downloadProgress, downloadTotal, ACTION_CANCEL);
       break;
     case State::ERROR:
       if (mappedInput.hasTouch()) {

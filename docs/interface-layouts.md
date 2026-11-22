@@ -1,14 +1,25 @@
 # Interface layouts and reader fonts
 
+Appearance > Interface theme > General also offers Header color. Appearance default uses black for Framed and Carousel and white for Carousel 2 and Bookshelf. Black and White override the header without changing the layout or body theme. Text, clock, battery and header icons change contrast together, including after rotation and in night mode. PET and Reading Adventure also follow this choice, including their artwork screens. With a white header, Framed and Carousel use a white outlined Continue reading button with black text. The button and its neighboring arrows still follow the body’s normal night-mode inversion; the header choice itself stays absolute. Changing header color leaves the remaining body controls and artwork unchanged. This reuses the existing header output inversion and adds no framebuffer. The Home dashboard in Framed, Carousel and Carousel 2, the Apps and Games folders, and the PET and Reading Adventure artwork screens honor the selected color when drawing. The Home dashboard and Apps/Games lists account for night inversion while painting, so the selected color does not require a post-draw header pass in either mode. The renderer uses the registered polarity to preserve contrast in all other cases.
+
+Carousel 2 centers its visible shortcuts as a group. One to three use a centered single row; four use 2+2, five use 3+2 and six use 3+3. A short final row is centered between the upper shortcuts. The Settings shortcut remains in the header. The same rectangles drive painting and touch targets in portrait and landscape.
+
+Header output inversion uses whole-byte spans with masks only at the two edges. Window refreshes retain full header compensation because supported display drivers can promote them to full-screen updates. Panel timing excludes this software conversion; the existing repaint trace can distinguish conversion/drawing time from the display waveform. No SD access, heap allocation, task or extra framebuffer is added.
+
 Appearance > Interface theme separates the Home layout from the rest of the interface. General follows the Home theme unless another theme is chosen. Files, Library, File Transfer, Reading Stats, Games, Apps, Settings, reader controls and the control panel can each inherit General or select Framed, Carousel, Carousel 2 or Bookshelf. The Home row changes the same Home theme shown in Appearance. Existing settings continue to follow Home until an override is selected. Interface font choices remain independent of these themes and of the book's reading font.
 
-Settings > Appearance offers Framed, Carousel, Carousel 2 and Bookshelf. The following describes the two legacy layouts; [Cover themes and Library](cover-themes-library.md) describes the new layouts and their white headers. Framed keeps the book card and divided menu, with known progress at the cover's upper right. Carousel is the former Focus layout: the most recent book centered between exactly two neighboring covers, separated reading progress and compact menu icons. The old third layout migrates to Carousel. Swipe horizontally, tap a neighboring-cover band, or use the arrows to change the selected recent book. The center opens the selected book. Settings > Appearance > Recent books selects how many available books both Home layouts browse, from one to ten (default three), using the existing recently opened store. Navigation wraps in both directions. Reducing this display limit does not remove books from the history or SD card. Other recent-book views retain their existing behavior. It never adds synthetic books or changes their order. Settings remains enabled and follows the saved Home menu order, alongside shortcuts. Settings > System > Home Menu > Reorder Menu Items changes that order. See [Settings](settings.md) for the current category menu.
+Settings > Appearance offers Framed, Carousel, Carousel 2 and Bookshelf. The following describes the two legacy layouts; [Cover themes and Library](cover-themes-library.md) describes the new layouts and their white headers. Framed keeps the book card and divided menu, with known progress at the cover's upper right. Carousel is the former Focus layout: the most recent book centered between up to two neighboring covers, separated reading progress and compact menu icons. The old third layout migrates to Carousel. Swipe horizontally, tap a neighboring-cover band, or use the arrows to change the selected recent book. The center opens the selected book. Settings > Appearance > Recent books selects how many available books both Home layouts browse, from one to ten (default three), using the existing recently opened store. Navigation wraps in both directions. Reducing this display limit does not remove books from the history or SD card. Other recent-book views retain their existing behavior. It never adds synthetic books or changes their order. Settings remains enabled and follows the saved Home menu order, alongside shortcuts. Settings > System > Home Menu > Reorder Menu Items changes that order. See [Settings](settings.md) for the current category menu.
 
 The layouts share the existing Home dashboard, input host, cover generation and one optional B/W art cache. Neighbor art is streamed one bitmap at a time. The existing fallible cache covers the carousel's art region rather than only its center cover (roughly 25 KiB at the largest supported portrait layout, orientation/region alignment dependent). Cache failure paints the art again; it does not block navigation. No animation loop, task or second continuous framebuffer is added. Physical peak heap/largest block and refresh quality still need device measurement. CrossInk's carousel and the SDK's three-slot component were evaluated; the three overlapping cover positions and streamed bitmap ownership remain in the local Home renderer.
 
 Framed and Carousel show day and month on the left, a centered local clock,
 and battery on the right. An old Library appearance setting falls back to Framed.
 The indexed Library and the Files browser remain available through their normal entries.
+
+Carousel 2 uses the saved Home menu's visibility, order, custom labels and app
+shortcuts. Settings stays in its header gear; the remaining visible entries use
+the six existing lower slots. Touch and button navigation resolve the same
+saved entry; no separate fixed action list is maintained.
 
 ## Indexed Library
 
@@ -54,11 +65,13 @@ The reader Font family picker uses the same prose typeface as Contents, natural-
 family names and 56-pixel selectable rows (option 1). Its Normal and Bold Aa samples are touch choices that update
 the same font-weight setting and the Weight row; the selected sample is outlined. The family list remains paginated in both orientations.
 
-The root folders apps, fonts, dictionaries and licenses are reserved SD resources.
-Files and Library omit them regardless of Show hidden files; identically named
-subfolders inside a user's Books folder remain ordinary content. An older Library
-index is rebuilt once with the current visibility policy, preserving arrival history
-through normal reconciliation. Resource files and reading progress are unchanged.
+Root app-resource folders remain excluded from Library. Files hides them, root
+notes, dot folders and custom hidden folders while Show hidden files is off;
+enabling that setting reveals them in Files. Holding a custom folder offers
+Hide/Show without renaming it or changing app access. See
+[Hidden folders](hidden-folders.txt). Identically named subfolders inside a user's
+Books folder remain ordinary content unless explicitly hidden. The Library
+inventory policy and reading progress are unchanged.
 
 Games and Apps use a larger footer page selector: 64-pixel arrow controls and the
 body type size for the page numbers. Their list and footer reserve the same space
@@ -68,11 +81,27 @@ In the landscape Font panel, Weight sits above the Normal/Bold samples. Family a
 Size share the other column. The sample boxes no longer have a vertical divider.
 All reader-sheet sections leave padding above their separator rules and use
 12-pixel gaps between rows or footer controls, except the compact landscape Contents panel, which uses 8-pixel gaps. The portrait sheet uses 76% of the
-safe height in Contents, Font, Layout and More; this preserves two-line chapter
-titles and the Aa preview while adding space. The font-family rows remain 56 pixels.
+safe height in Framed/Carousel and 73% in Carousel 2/Bookshelf, keeping the book
+visible above the controls. Landscape uses 94% and 84%, respectively, capped by
+the reading sample's lower edge in Settings. Font-family rows use 56 pixels in
+Framed/Carousel and 50 pixels in Carousel 2/Bookshelf. Chapter-title padding
+contracts as needed to keep two full text lines inside each row.
 Layout uses 96-pixel stepper rows. In landscape, Line spacing and Margins sit in
 two columns above Alignment; portrait stacks them vertically. The chapter/menu
 pager has 44-pixel arrow targets.
+
+Text settings keep a fixed preview/panel boundary while the sample responds to
+font and spacing changes. The redundant font caption and scope footer are omitted.
+More contains the style checkboxes and the persistent Use as default checkbox.
+It isolates book-specific changes while enabled; disabling it shares subsequent
+text changes across books. Alignment uses five icon controls.
+
+Collection book lists use the Files row metrics: at most two title lines, ellipsis
+for longer filenames and the format at the trailing edge. Finished books rebuilds
+membership from the reading journal and the available recent/library paths, then
+stores a disposable membership cache under `/.crosspoint/collections/`. Journal
+and library revisions plus the membership generation validate reuse. A missing or
+damaged cache is rebuilt; the source books and reading history are unchanged.
 
 ## Landscape on Xteink X4 Pro
 
@@ -85,7 +114,7 @@ single shared dividers, with a continuous filled selection. Wallpaper previews
 fit and center the complete image in the current orientation without upscaling;
 notices reserve separate space for their actions.
 Home gives covers more height and uses smaller title/author cuts. Landscape Carousel omits the resume bar and arrow buttons; tapping the central cover opens the book, and swipes or the neighboring covers change books. Library and
-Wallpapers use four larger thumbnails per page. Contents shows four chapters
+Wallpapers use four larger thumbnails per page. Contents shows two chapters
 per page with compact chrome and the same chapter selection and page controls.
 Reading statistics reserve enough height for streak values, and Chess centers
 its side panels against the board. Word deletion places its explanation and
@@ -161,3 +190,45 @@ On the device, check both rotations, page through all habits and decks, open the
 last item on each page, and rotate while on a later page. Check Picross clue and
 cell alignment, Go intersections, Battleship placement and firing, Wordle keys,
 and the final Pomodoro stage page. The painted targets must match touch input.
+
+## Extensions
+
+The plugin picker, catalog lists and Plugin Hub installer use the shared menu
+header, including the active interface font, clock and battery. Framed and
+Carousel show joined square boxes with one separator per row; Carousel 2 and
+Bookshelf show outlined rounded cards. Plugin titles are larger than their
+regular descriptions. Touch does not leave the first row highlighted.
+
+The existing catalog viewport, vertical swipes, long-press actions, downloads
+and sign-in flows retain their input owners. Check an empty picker, the Hub
+entry, installed plugins, and a scrollable catalog in both orientations and
+English/Spanish. Back and Search must match their painted hit areas.
+
+Reader Layout groups paragraph spacing, indentation, word spacing and character
+spacing on its second page. Shorter Settings previews retain pagination when
+needed to preserve touch targets. Style rows align labels and checkboxes within
+one outline, with a visible border for hardware-button focus. Dictionary and
+translator actions use the open dictionary icon rather than the refresh icon.
+
+
+Text settings uses the same Font, Layout and More controls as the reader.
+“Use as default” is a persistent checkbox, enabled for existing and new saves.
+While enabled, settings edited here are the common defaults, and changes made
+inside a book remain private to that book. Disable it to share subsequent
+in-book text changes across books. Existing private records remain stored and
+are used again when the option is enabled; the current open book keeps its
+visible layout when changing this option. Manage fonts is no longer listed in
+Reading settings; installed fonts remain available in the font picker.
+
+Keyboard layouts lists the ten built-in layouts and the optional layouts found
+under /languages/keyboards on the microSD. Fixed pages, arrow controls and vertical
+swipes use the same row capacity. The active interface language is always enabled,
+and at least one Latin layout remains available for credentials. The language key
+cycles enabled layouts, loading only the current optional keyboard. Wordle keeps
+its own game-language keyboard. Missing or invalid optional layouts fall back to
+the built-in choices. Check Arabic names, Japanese/Thai selection, the last page,
+and saved selections after restarting in both orientations.
+
+Carousel and Carousel 2 loading placeholders respect the Recent books limit already held in settings: one slot for one, two for two, and up to three visible slots otherwise. This first frame does not load or count the recent-book store; normal content preparation still checks which books are available afterward. With two available books, the neighbor is drawn once. The recent-book count dialog uses a regular-weight title.
+
+The Bluetooth status banner in Quick Settings opens Bluetooth settings in every visible state, including unpaired, disconnected and paused states. The Wi-Fi header icon remains a direct Wi-Fi settings shortcut. Both use the same bounded settings action; the separate Bluetooth quick-action tile keeps its existing enable/disable behavior.

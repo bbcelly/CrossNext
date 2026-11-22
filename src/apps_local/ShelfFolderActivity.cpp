@@ -126,7 +126,6 @@ void ShelfFolderActivity::loop() {
   if (!navigation.capture(mappedInput, millis())) LOG_ERR("SHELF", "Navigation queue full");
   RenderLock lock(RenderLock::Mode::Try);
   if (!lock.ownsLock()) return;
-
   const auto swipe = mappedInput.wasSwipe();
   int touchX = 0, touchY = 0;
   if (buttonCursorVisible &&
@@ -299,6 +298,7 @@ void ShelfFolderActivity::render(RenderLock&&) {
   model.selected = buttonCursorVisible ? selected - first : -1;
   model.page = page;
   model.pageCount = paging.pageCount;
+  model.outputInverted = renderer.isOutputInverted();
   shelfui::buildMenu(screen, model);
 
   interactionsReady = true;

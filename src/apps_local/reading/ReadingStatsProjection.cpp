@@ -14,6 +14,12 @@
 namespace readingstats::cloud {
 namespace {
 constexpr int firstDay = 10957;  // 2000-01-01, same epoch-day representation as the journal.
+int completionDay(const Book& book) {
+  if (book.finishedDay) return book.finishedDay;
+  // Sync snapshots store the service's finish date as Unix seconds.
+  const auto day = book.finishedEpoch / 86400;
+  return day > 0 && day <= INT32_MAX ? static_cast<int>(day) : 0;
+}
 uint64_t hash(uint64_t value, const uint8_t* bytes, size_t size) {
   while (size--) value = (value ^ *bytes++) * 1099511628211ULL;
   return value;
@@ -46,6 +52,7 @@ void Projection::close() {
   remote = nullptr;
   countBooks = 0;
   header = {};
+  years = {};
   current = {};
 }
 Projection::Entry* Projection::locate(const char* text, bool create) {
@@ -55,12 +62,11 @@ Projection::Entry* Projection::locate(const char* text, bool create) {
   uint32_t at = checksum(key, 16) & (kSlots - 1);
   for (uint32_t n = 0; n < kSlots; ++n, at = (at + 1) & (kSlots - 1)) {
     auto& e = entries[at];
-    if (e.used) {
+    if (e.cloud || e.latest) {
       if (!std::memcmp(e.document, key, 16)) return &e;
       continue;
     }
     if (!create || countBooks >= kMaxBooks) return nullptr;
-    e.used = true;
     std::memcpy(e.document, key, 16);
     order[countBooks++] = at;
     return &e;
@@ -99,7 +105,10 @@ Result Projection::open(Reader* source, int today, uint64_t device, const Header
   entries = reinterpret_cast<Entry*>(indexMemory.get());
   order = reinterpret_cast<uint32_t*>(orderMemory.get());
   daily = reinterpret_cast<uint64_t*>(dayMemory.get());
-  if (remote) header = remote->data();
+  if (remote) {
+    header = remote->data();
+    if (!header.finished && !header.unattributedCompleted) header.unattributedCompleted = header.summary.completed;
+  }
   int anchor = today >= firstDay && today < firstDay + int(kDates) ? today : header.summary.anchorDay;
   if (anchor < firstDay || anchor >= firstDay + int(kDates)) anchor = firstDay;
   header.summary.anchorDay = anchor;
@@ -116,10 +125,18 @@ Result Projection::open(Reader* source, int today, uint64_t device, const Header
     if (!remote->days(daily, kDates)) return Result::StorageError;
     for (uint32_t n = 0; n < remote->data().books; ++n) {
       if (!remote->at(n, base)) return Result::StorageError;
+      years.addDay(base.firstDay);
+      years.addDay(base.lastDay);
+      const int finishDay = base.completed ? completionDay(base) : 0;
+      years.addDay(finishDay);
       auto* entry = locate(base.document, true);
       if (!entry) return Result::LimitExceeded;
       entry->cloud = n + 1;
       entry->finished = base.completed;
+      entry->importedFinishedEpoch = base.finishedEpoch;
+      const int finishYear = finishDay ? dateFromDay(finishDay).year : 0;
+      if (finishYear >= RecordedYears::firstYear && finishYear <= RecordedYears::lastYear)
+        entry->importedFinishedYearOffset = finishYear - RecordedYears::firstYear + 1;
       yieldIo(n);
     }
   }
@@ -148,6 +165,7 @@ Result Projection::open(Reader* source, int today, uint64_t device, const Header
     uint64_t fingerprint = 14695981039346656037ULL;
     for (uint64_t at = 16; at < size; at += kRecordBytes) {
       if (input.read(raw, kRecordBytes) != kRecordBytes || !decode(raw, record)) return Result::StorageError;
+      years.add(record);
       fingerprint = hash(fingerprint, raw, kRecordBytes);
       if (same && at + kRecordBytes == checkpoint.localLength && fingerprint != checkpoint.localHash)
         return Result::LocalChanged;
@@ -190,6 +208,15 @@ Result Projection::open(Reader* source, int today, uint64_t device, const Header
         }
       }
       entry->finished = record.book.manuallyUnfinished ? false : entry->finished || record.book.completed;
+      int localFinish = record.book.finishedDay;
+      // Legacy snapshots retain the calendar day only on the original completion event.
+      if (!localFinish && record.firstCompletion)
+        localFinish = record.localDay + (uint64_t(record.secondOfDay) + record.seconds) / 86400;
+      if (!localFinish) localFinish = entry->localFinishedDay;
+      const auto epoch = record.book.finishedEpoch;
+      const bool localDate = record.book.completed && (epoch > entry->importedFinishedEpoch ||
+                                                       (epoch == entry->importedFinishedEpoch && localFinish));
+      entry->localFinishedDay = localDate ? (localFinish ? localFinish : completionDay(record.book)) : 0;
       yieldIo((at - 16) / kRecordBytes);
     }
     current.hash = fingerprint;
@@ -203,7 +230,8 @@ Result Projection::open(Reader* source, int today, uint64_t device, const Header
   header.finished = 0;
   for (uint32_t n = 0; n < countBooks; ++n) header.finished += entries[order[n]].finished;
   // Completion is a book state, including explicit local reversals, not a sum across devices.
-  header.summary.completed = header.finished;
+  if (UINT32_MAX - header.finished < header.unattributedCompleted) return Result::LimitExceeded;
+  header.summary.completed = header.finished + header.unattributedCompleted;
   header.summary.anchorDay = anchor;
   auto& s = header.summary;
   s.totalDays = 0;
@@ -222,6 +250,7 @@ Result Projection::open(Reader* source, int today, uint64_t device, const Header
     }
     const bool active = daily[n] || (in && (header.active[off / 8] & (1u << (off % 8))));
     if (active) {
+      years.addDay(day);
       ++s.totalDays;
       ++run;
       s.lastReadDay = day;
@@ -239,6 +268,7 @@ bool Projection::merge(const Entry& e, Book& out) {
   if (!read(e.latest, latest) || !read(e.prior, prior)) return false;
   if (latest.seconds < prior.seconds || latest.sessions < prior.sessions || latest.pages < prior.pages) return false;
   out = base;
+  if (out.completed) out.finishedDay = completionDay(out);
   const uint64_t seconds = latest.seconds - prior.seconds;
   if (UINT64_MAX - out.seconds < seconds || UINT32_MAX - out.sessions < latest.sessions - prior.sessions ||
       UINT32_MAX - out.pages < latest.pages - prior.pages)
@@ -257,12 +287,18 @@ bool Projection::merge(const Entry& e, Book& out) {
     if (!out.firstEpoch || (latest.firstEpoch && latest.firstEpoch < out.firstEpoch))
       out.firstEpoch = latest.firstEpoch;
     out.lastEpoch = std::max(out.lastEpoch, latest.lastEpoch);
-    out.finishedEpoch = std::max(out.finishedEpoch, latest.finishedEpoch);
-    out.completed = latest.manuallyUnfinished ? false : out.completed || latest.completed;
+    if (e.localFinishedDay) {
+      out.finishedEpoch = latest.finishedEpoch;
+      out.finishedDay = e.localFinishedDay;
+    }
     out.manuallyUnfinished = latest.manuallyUnfinished;
-    if (latest.manuallyUnfinished) out.finishedEpoch = 0;
+    if (latest.manuallyUnfinished) {
+      out.finishedEpoch = 0;
+      out.finishedDay = 0;
+    }
     if (e.latest >= cutoff) out.progressBp = latest.progressBp;
   }
+  out.completed = e.finished;
   if (out.completed) out.progressBp = 10000;
   document(e.document, out.document);
   return true;
@@ -286,6 +322,42 @@ bool Projection::page(BookFilter filter, int page, Book* out, int capacity, int&
 }
 uint64_t Projection::daySeconds(int day) const {
   return daily && day >= firstDay && day < firstDay + int(kDates) ? daily[day - firstDay] : 0;
+}
+bool Projection::annualTimeKnown(const PeriodStats& period) const {
+  if (!remote) return true;
+  bool datedActivity = false;
+  const auto& imported = remote->data();
+  if (imported.summary.seconds && !imported.days && period.first < imported.summary.anchorDay - kHistoryDays + 1)
+    return false;
+  for (int n = 0; n < kHistoryDays; ++n) {
+    const int day = imported.summary.anchorDay - n;
+    if (!remote->activeOn(day)) continue;
+    datedActivity = true;
+    if (day >= period.first && day <= period.last && !remote->knownOn(day)) return false;
+  }
+  return datedActivity || imported.days || !imported.summary.seconds;
+}
+bool Projection::annualFinished(int year, uint32_t& count) const {
+  count = 0;
+  if (header.unattributedCompleted) return false;
+  uint32_t total = 0;
+  for (uint32_t n = 0; n < header.finished; ++n) {
+    const auto& entry = entries[order[n]];
+    const int finishedYear = entry.localFinishedDay ? dateFromDay(entry.localFinishedDay).year
+                             : entry.importedFinishedYearOffset
+                                 ? RecordedYears::firstYear + entry.importedFinishedYearOffset - 1
+                                 : 0;
+    if (!finishedYear) return false;
+    if (finishedYear == year) ++total;
+  }
+  count = total;
+  return true;
+}
+bool Projection::projectAnnual(PeriodStats& out, bool& timeKnown, bool& finishedKnown) const {
+  if (!project(out, &timeKnown)) return false;
+  timeKnown &= annualTimeKnown(out);
+  finishedKnown = annualFinished(dateFromDay(out.first).year, out.completed);
+  return true;
 }
 bool Projection::project(PeriodStats& out, bool* known) const {
   if (known) *known = false;

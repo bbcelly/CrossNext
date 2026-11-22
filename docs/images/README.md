@@ -1,5 +1,7 @@
-Project presentation images supplied by the CrossNext maintainer for the repository README. Preserved as supplied; these are promotional compositions, not a hardware benchmark. Some embedded screenshots predate the final controls; the README records the differences.
+The CrossNext maintainer supplied these promotional compositions for both repository READMEs. The images retain their original pixels and dimensions.
 
-`pet.png` is the maintainer's PET overview, copied without modification from
-`Diseño sin título.png`. It presents status, care, home and album. In the current
-firmware, the food/remedies panel is informational and has no arrow or action.
+`book-preparer.png` shows the initial English interface of CrossNext Book
+Preparer 2.0.5 before a card is selected.
+
+`pet.png` shows the pet's status, decoration options, previous generations and
+difficulty settings.

@@ -13,10 +13,12 @@ struct TestStorage {
   std::map<std::string, std::vector<uint8_t>> files;
   std::set<std::string> directories{"/"};
   bool available = true;
+  bool failClose = false;
   int writeLimit = -1;
   size_t bytesRead = 0;
   size_t readCalls = 0, seekCalls = 0;
   int renameCalls = 0, failRenameAt = -1;
+  int enumerationCalls = 0, failEnumerationAt = -1;
 };
 inline TestStorage testStorage;
 class HalFile : public Print {
@@ -30,7 +32,17 @@ class HalFile : public Print {
   bool isDirectory() const { return !directory.empty(); }
   void getName(char* out, size_t n) { std::snprintf(out, n, "%s", filename.c_str()); }
   HalFile openNextFile() {
+    bool ioError = false;
+    return openNextFile(ioError);
+  }
+  bool openNextFile(HalFile& entry, bool& ioError) {
+    entry = openNextFile(ioError);
+    return bool(entry);
+  }
+  HalFile openNextFile(bool& ioError) {
     HalFile f;
+    ioError = ++testStorage.enumerationCalls == testStorage.failEnumerationAt || !testStorage.available;
+    if (ioError) return f;
     size_t at = 0;
     for (auto& item : testStorage.files) {
       if (item.first.substr(0, directory.size() + 1) != directory + "/") continue;
@@ -46,10 +58,12 @@ class HalFile : public Print {
   }
   bool isOpen() const { return bool(*this); }
   uint32_t modificationTime() { return 0; }
-  void close() {
+  bool close() {
+    const bool okay = !testStorage.failClose;
     data = nullptr;
     directory.clear();
     cursor = 0;
+    return okay;
   }
   void flush() {}
   size_t size() { return data ? data->size() : 0; }
@@ -142,6 +156,16 @@ class HalStorage {
     return true;
   }
   bool remove(const char* p) { return testStorage.available && testStorage.files.erase(p); }
+  bool rmdir(const char* path) {
+    if (!testStorage.available || !testStorage.directories.count(path)) return false;
+    const std::string prefix = std::string(path) + "/";
+    for (const auto& item : testStorage.files)
+      if (item.first.rfind(prefix, 0) == 0) return false;
+    for (const auto& item : testStorage.directories)
+      if (item != path && item.rfind(prefix, 0) == 0) return false;
+    return testStorage.directories.erase(path);
+  }
+
   bool openFileForRead(const char* module, const std::string& p, HalFile& f) {
     return openFileForRead(module, p.c_str(), f);
   }

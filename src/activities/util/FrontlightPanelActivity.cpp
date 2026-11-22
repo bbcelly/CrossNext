@@ -1,5 +1,7 @@
 #include "FrontlightPanelActivity.h"
 
+#include <BlePageTurner.h>
+#include <BoardConfig.h>
 #include <ChromeRegion.h>
 #include <FreeInkUIIcon.h>
 #include <GfxRenderer.h>
@@ -19,8 +21,10 @@
 #include "../reader/ReaderUtils.h"
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
+#include "activities/settings/BleSettingsActivity.h"
 #include "apps_local/power/PowerMenuActivity.h"
 #include "apps_local/ui/PixelMenuTheme.h"
+#include "apps_local/ui/QuickSettingsDirtyRegion.h"
 #include "apps_local/ui/Rotation.h"
 #include "components/UITheme.h"
 #include "components/UIThemeTokens.h"
@@ -60,6 +64,8 @@ void FrontlightPanelActivity::onEnter() {
   lightOnChanged = false;
   backdropPainted = false;
   lastClockPoll = millis();
+  bluetoothState = bluetoothui::current(SETTINGS.ble);
+  wifiConnected = WiFi.status() == WL_CONNECTED;
 
   resetUi();
   app.on(ACTION_BRIGHTNESS, &FrontlightPanelActivity::onBrightnessEvent, this);
@@ -67,6 +73,7 @@ void FrontlightPanelActivity::onEnter() {
   app.on(ACTION_BRIGHTNESS_STEP, &FrontlightPanelActivity::onBrightnessStepEvent, this);
   app.on(ACTION_WARMTH_STEP, &FrontlightPanelActivity::onWarmthStepEvent, this);
   app.on(ACTION_TILE, &FrontlightPanelActivity::onTileEvent, this);
+  app.on(quickui::OpenSettings, &FrontlightPanelActivity::onSettingsEvent, this);
   app.setScreen(&FrontlightPanelActivity::panelScreen, this);
   requestUpdate();
 }
@@ -107,6 +114,7 @@ void FrontlightPanelActivity::onExit() {
 void FrontlightPanelActivity::onBrightnessEvent(const fui::ActionEvent& event, void* user) {
   auto* self = static_cast<FrontlightPanelActivity*>(user);
   if (event.dragPermille < 0) return;
+  self->app.clearTapFlash();
   const auto value = percentFromPermille(event.dragPermille);
   if (value) {
     self->brightness = value;
@@ -122,6 +130,7 @@ void FrontlightPanelActivity::onBrightnessEvent(const fui::ActionEvent& event, v
 void FrontlightPanelActivity::onWarmthEvent(const fui::ActionEvent& event, void* user) {
   auto* self = static_cast<FrontlightPanelActivity*>(user);
   if (event.dragPermille < 0) return;
+  self->app.clearTapFlash();
   self->warmth = percentFromPermille(event.dragPermille);
   if (self->warmth) self->rememberedWarmth = self->warmth;
   Frontlight.setWarmth(self->warmth);
@@ -129,15 +138,32 @@ void FrontlightPanelActivity::onWarmthEvent(const fui::ActionEvent& event, void*
 }
 
 void FrontlightPanelActivity::onBrightnessStepEvent(const fui::ActionEvent& event, void* user) {
-  static_cast<FrontlightPanelActivity*>(user)->adjustBrightness(event.value);
+  auto* self = static_cast<FrontlightPanelActivity*>(user);
+  self->app.clearTapFlash();
+  self->adjustBrightness(event.value);
 }
 
 void FrontlightPanelActivity::onWarmthStepEvent(const fui::ActionEvent& event, void* user) {
-  static_cast<FrontlightPanelActivity*>(user)->adjustWarmth(event.value);
+  auto* self = static_cast<FrontlightPanelActivity*>(user);
+  self->app.clearTapFlash();
+  self->adjustWarmth(event.value);
 }
 
 void FrontlightPanelActivity::onTileEvent(const fui::ActionEvent& event, void* user) {
   static_cast<FrontlightPanelActivity*>(user)->runTile(event.value);
+}
+
+void FrontlightPanelActivity::onSettingsEvent(const fui::ActionEvent& event, void* user) {
+  auto* self = static_cast<FrontlightPanelActivity*>(user);
+  self->app.clearTapFlash();
+  switch (static_cast<quickui::SettingsDestination>(event.value)) {
+    case quickui::SettingsDestination::Bluetooth:
+      self->openBluetoothSettings();
+      break;
+    case quickui::SettingsDestination::Wifi:
+      self->openWifiSettings();
+      break;
+  }
 }
 
 void FrontlightPanelActivity::runTile(const int idx) {
@@ -184,22 +210,35 @@ void FrontlightPanelActivity::runTile(const int idx) {
     case quickui::Shortcut::Warm:
       toggleWarmth();
       break;
+    case quickui::Shortcut::Bluetooth:
+      SETTINGS.ble.enabled = SETTINGS.ble.enabled ? 0 : 1;
+      if (!SETTINGS.ble.enabled)
+        bleturner::switchOff();
+      else
+        bleturner::requestConnect();
+      SETTINGS.saveToFile();
+      if (!SETTINGS.ble.enabled) {
+        // The parent restores its page when the expanded sheet closes.
+        close();
+        return;
+      }
+      {
+        RenderLock lock;
+        syncBluetoothState(bluetoothui::current(SETTINGS.ble));
+      }
+      requestUpdate();
+      return;
     case quickui::Shortcut::Wifi:
-      persistLightSettings();
-      if (auto next =
-              makeUniqueNoThrow<WifiSelectionActivity>(renderer, mappedInput, false, WifiSelectionPurpose::Manage)) {
-        suspendedForWifi = true;
-        startActivityForResult(std::move(next), [this](const ActivityResult&) {
-          RenderLock lock;
-          syncLightState(true);
-          suspendedForWifi = false;
-          backdropPainted = false;
-          requestUpdate();
-        });
-      } else
-        LOG_ERR("QUICK", "OOM: Wi-Fi selection");
+      openWifiSettings();
       break;
     case quickui::Shortcut::Lock:
+      if (!BoardConfig::hasHomeKey()) return;
+      SETTINGS.touchScreenLocked = SETTINGS.touchScreenLocked ? 0 : 1;
+      mappedInput.swallowCurrentTouch();
+      mappedInput.resetHomeButtonInput();
+      SETTINGS.saveToFile();
+      close();
+      return;
     case quickui::Shortcut::Sleep:
       persistLightSettings();
       powermenu::request(powermenu::Action::Sleep);
@@ -278,12 +317,59 @@ void FrontlightPanelActivity::toggleWarmth() {
 }
 void FrontlightPanelActivity::close() { finish(); }
 
+void FrontlightPanelActivity::syncBluetoothState(const bluetoothui::State state) {
+  if (quickui::hasBluetoothStatus(bluetoothState) != quickui::hasBluetoothStatus(state)) resetUi();
+  bluetoothState = state;
+}
+
+void FrontlightPanelActivity::openBluetoothSettings() {
+  persistLightSettings();
+  auto next = makeUniqueNoThrow<BleSettingsActivity>(renderer, mappedInput);
+  if (!next) {
+    LOG_ERR("QUICK", "OOM: Bluetooth settings");
+    return;
+  }
+  startActivityForResult(std::move(next), [this](const ActivityResult&) { close(); });
+}
+
+void FrontlightPanelActivity::openWifiSettings() {
+  persistLightSettings();
+  auto next = makeUniqueNoThrow<WifiSelectionActivity>(renderer, mappedInput, false, WifiSelectionPurpose::Manage);
+  if (!next) {
+    LOG_ERR("QUICK", "OOM: Wi-Fi selection");
+    return;
+  }
+  suspendedForWifi = true;
+  startActivityForResult(std::move(next), [this](const ActivityResult&) {
+    RenderLock lock;
+    syncLightState(true);
+    wifiConnected = WiFi.status() == WL_CONNECTED;
+    suspendedForWifi = false;
+    backdropPainted = false;
+    requestUpdate();
+  });
+}
+
 bool FrontlightPanelActivity::handleHomeGesture() {
   close();
   return true;
 }
 
 void FrontlightPanelActivity::loop() {
+  const auto bluetooth = bluetoothui::current(SETTINGS.ble);
+  {
+    RenderLock lock(RenderLock::Mode::Try);
+    if (lock.ownsLock() && bluetoothState != bluetooth) {
+      syncBluetoothState(bluetooth);
+      requestUpdate();
+    }
+  }
+  if (brightness != std::max(MIN_BRIGHTNESS, Frontlight.brightness()) || warmth != Frontlight.warmth() ||
+      lightOn != Frontlight.isOn()) {
+    RenderLock lock;
+    syncLightState(false);
+    requestUpdate();
+  }
   if (mappedInput.sideButtonAction() == SideButtonAction::ToggleWarmth ||
       mappedInput.homeButtonAction() == HomeButtonAction::ToggleFrontlight) {
     RenderLock lock;
@@ -301,7 +387,16 @@ void FrontlightPanelActivity::loop() {
   lastTouchY = held ? touchY : -1;
   const auto touch = routeTouch(mappedInput, false, /*routeHeld=*/moved);
   if (touch.routed) {
-    if (app.invalidated()) requestUpdate();
+    if (app.invalidated()) {
+      if (held)
+        sliderPaintPending = true;
+      else
+        requestUpdate();
+    }
+    if (sliderPaintPending && millis() - lastPanelPaint.load() >= 120) {
+      sliderPaintPending = false;
+      requestUpdate();
+    }
     if (touch) {
       if (touch.event.dragPermille >= 0) draggingSlider = true;
       return;
@@ -325,6 +420,7 @@ void FrontlightPanelActivity::loop() {
   if (draggingSlider) {
     if (!touch.snap.touchHeld) {
       draggingSlider = false;
+      sliderPaintPending = false;
       requestUpdate();
     }
     return;
@@ -336,8 +432,11 @@ void FrontlightPanelActivity::loop() {
     const auto now = std::time(nullptr);
     const bool valid = (now > 0 && localtime_r(&now, &local) && local.tm_year >= 120) || halClock.localTime(local);
     const int minute = valid ? local.tm_hour * 60 + local.tm_min : -1;
-    if (minute != shownMinute) {
+    const bool connected = WiFi.status() == WL_CONNECTED;
+    RenderLock lock;
+    if (minute != shownMinute || wifiConnected != connected) {
       shownMinute = minute;
+      wifiConnected = connected;
       requestUpdate();
     }
   }
@@ -357,20 +456,14 @@ void FrontlightPanelActivity::loop() {
                                        [this] { adjustBrightness(BRIGHTNESS_STEP); });
 }
 
-int FrontlightPanelActivity::computePanelBottom() const {
-  return quickui::layout(uiTarget.deviceContext(), Frontlight.present(), Frontlight.hasColorTemperature(),
-                         mappedInput.hasTouch())
-      .bottom;
-}
 void FrontlightPanelActivity::panelScreen(UiScreen& screen, void* user) {
   static_cast<FrontlightPanelActivity*>(user)->buildPanelScreen(screen);
 }
-void FrontlightPanelActivity::buildPanelScreen(UiScreen& screen) {
-  chrome::headerHeight = 0;
-  pixelui::FontScope fonts(uiTarget, renderer, I18N.getLanguage() != Language::EN);
+void FrontlightPanelActivity::preparePanelModel() {
   status.status.battery.label = nullptr;
   GUI.applyHeaderStatus(renderer, status);
-  quickui::Model model;
+  panelModel = {};
+  auto& model = panelModel;
   tm local{};
   const auto now = std::time(nullptr);
   if ((now > 0 && localtime_r(&now, &local) && local.tm_year >= 120) || halClock.localTime(local)) {
@@ -380,7 +473,8 @@ void FrontlightPanelActivity::buildPanelScreen(UiScreen& screen) {
     shownMinute = -1;
   }
   std::copy(std::begin(SETTINGS.quickActions), std::end(SETTINGS.quickActions), model.shortcuts);
-  model.wifiConnected = WiFi.status() == WL_CONNECTED;
+  model.bluetooth = bluetoothState;
+  model.wifiConnected = wifiConnected;
   model.brightness = lightOn ? brightness : 0;
   model.warmth = lightOn ? warmth : 0;
   model.rotateRight = SETTINGS.rotationDirection != 0;
@@ -393,15 +487,32 @@ void FrontlightPanelActivity::buildPanelScreen(UiScreen& screen) {
   model.touchOn = !mappedInput.isTouchscreenLocked();
   model.lightOn = lightOn;
   model.shadeBackdrop = !backdropPainted;
-  quickui::build(screen, model, panelWork);
+}
+
+void FrontlightPanelActivity::buildPanelScreen(UiScreen& screen) {
+  chrome::recordPaintedHeader(0, false);
+  pixelui::FontScope fonts(uiTarget, renderer, I18N.getLanguage() != Language::EN);
+  uiTarget.setFont(fui::HEADER_CLOCK_FONT, UI_10_FONT_ID);
+  quickui::build(screen, panelModel, panelWork);
 }
 
 void FrontlightPanelActivity::render(RenderLock&&) {
-  panelBottom = computePanelBottom();
+  preparePanelModel();
+  const auto device = uiTarget.deviceContext();
+  const auto layout = quickui::layout(device, panelModel.light, panelModel.temperature, panelModel.touch,
+                                      quickui::hasBluetoothStatus(panelModel.bluetooth));
+  const bool full = !backdropPainted || cleanRefreshPending || paintedWidth != device.width ||
+                    paintedHeight != device.height || paintedOrientation != uint8_t(renderer.getOrientation()) ||
+                    paintedLightHeader != chrome::lightHeader || panelBottom != layout.bottom;
+  panelBottom = layout.bottom;
+  const auto dirty = quickui::dirtyRegion(paintedModel, panelModel, layout, device.width);
+  const auto previousClip = uiTarget.clipRect();
+  const bool partial = !full && uiTarget.setClipRect(dirty);
 
   // fui::sheet draws the card body, its bottom rule, and the grabber during
   // renderUi(); the battery band at the card's top is part of the screen build.
   renderUi();
+  if (partial) uiTarget.setClipRect(previousClip);
   backdropPainted = true;
 
   // A tile that rewrote the whole frame (night mode) re-drives every pixel
@@ -409,6 +520,15 @@ void FrontlightPanelActivity::render(RenderLock&&) {
   // flip the whole frame's polarity without the FULL waveform's blackout
   // flash. Any faint residue clears with the panel's dedicated refresh tile
   // or the next scheduled clean refresh.
-  renderer.displayBuffer(cleanRefreshPending ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH);
+  if (partial)
+    renderer.displayWindow(dirty.x, dirty.y, dirty.width, dirty.height);
+  else
+    renderer.displayBuffer(cleanRefreshPending ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH);
   cleanRefreshPending = false;
+  paintedModel = panelModel;
+  paintedWidth = device.width;
+  paintedHeight = device.height;
+  paintedOrientation = uint8_t(renderer.getOrientation());
+  paintedLightHeader = chrome::lightHeader;
+  lastPanelPaint.store(millis());
 }

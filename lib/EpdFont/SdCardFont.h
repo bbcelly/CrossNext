@@ -6,6 +6,7 @@
 
 #include "EpdFont.h"
 #include "EpdFontData.h"
+#include "FontAllocation.h"
 
 // On-disk binary format version for .cpfont files. Defined as a preprocessor
 // macro (rather than a constexpr) so it can be stringified into the SD-fonts
@@ -17,8 +18,9 @@
 // bumped manually when the firmware is updated to support a new format.
 // Reader enforcement: SdCardFont::load().
 #define CPFONT_VERSION 4
+#define CPFONT_EXTENDED_LIGATURE_VERSION 5
 
-class SdCardFont {
+class SdCardFont : public FontAllocation {
  public:
   static constexpr uint16_t MAX_PAGE_GLYPHS = 512;
   // prewarmStyle: the bitmap arena did not fit the largest free block.
@@ -36,7 +38,7 @@ class SdCardFont {
   SdCardFont& operator=(SdCardFont&&) = delete;
 
   // Load .cpfont file: reads header + intervals into RAM, records file layout offsets.
-  // Supports v4 (multi-style) format.
+  // Supports v4 and v5 (extended ligature count) multi-style formats.
   // Returns true on success.
   bool load(const char* path);
 
@@ -75,7 +77,7 @@ class SdCardFont {
   // (paragraph word-arena chunks), scanned without per-word string objects.
   int buildAdvanceTablePacked(const char* const* segments, const size_t* segmentLens, size_t segmentCount,
                               bool includeSpace, bool includeHyphen, uint8_t styleMask = 0x0F,
-                              const char* extraText = nullptr);
+                              const char* extraText = nullptr, bool includeSmallCaps = false);
 
   // Look up advanceX for a codepoint from the advance table.
   // Returns the 12.4 fixed-point advance, or 0 if not found.
@@ -143,6 +145,7 @@ class SdCardFont {
   // Content hash of the file header + style TOC entries (computed during load).
   // Used to generate deterministic font IDs for section cache invalidation.
   uint32_t contentHash() const { return contentHash_; }
+  static bool readContentHash(const char* path, uint32_t& hash);
 
  private:
   // Per-style metadata (parsed from file header/TOC)
@@ -157,7 +160,7 @@ class SdCardFont {
     uint16_t kernRightEntryCount = 0;
     uint8_t kernLeftClassCount = 0;
     uint8_t kernRightClassCount = 0;
-    uint8_t ligaturePairCount = 0;
+    uint16_t ligaturePairCount = 0;
   };
 
   // All per-style data: file offsets, intervals, kern/lig, prewarm cache, EpdFont

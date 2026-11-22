@@ -18,7 +18,9 @@
 #include "ProgressMapper.h"
 #include "ReaderActivity.h"
 #include "ReaderToolbarUi.h"
+#include "apps_local/reader/PageReuse.h"
 #include "components/OptionPopup.h"
+#include "util/BookDictionarySettings.h"
 
 namespace vocabulary {
 struct Context;
@@ -26,21 +28,34 @@ struct Context;
 
 class EpubReaderActivity final : public ReaderActivity {
   std::shared_ptr<Epub> epub;
+  int textLayoutPage = 0;
+  bookdictionary::Settings bookDictionaries;
+  std::vector<std::string> bookDictionaryFolders;
+  void openBookDictionaries();
+  void chooseBookDictionary(bool translation);
   std::unique_ptr<Section> section = nullptr;
   // One deserialized successor, moved into the normal render path on a hit.
   std::unique_ptr<Page> prefetchedPage;
+  readerpage::Reuse residentPage;
+  readerpage::Key pageReuseKey() const;
+  uint32_t prefetchedResource = 0, prefetchedMedia = 0;
   int prefetchedPageNumber = -1;
   int prefetchedSpineIndex = -1;
   uint32_t prefetchedLayoutSignature = 0;
   int prefetchAttemptedFromPage = -1;
   int lastRenderedPage = -1;
   unsigned long pageReadyAt = 0;
+  std::atomic<bool> prefetchInterrupted{false};
+  unsigned long prefetchStartedAt = 0;
+  static bool continuePrefetch(void* context);
   static constexpr size_t PREFETCH_MEMORY_BUDGET = 24 * 1024;
   static constexpr size_t PREFETCH_FREE_RESERVE = 64 * 1024;
   static constexpr size_t PREFETCH_INTERNAL_RESERVE = 48 * 1024;
   static constexpr size_t PREFETCH_MIN_BLOCK = 32 * 1024;
   static constexpr unsigned long PREFETCH_IDLE_MS = 400;
+  static constexpr unsigned long PREFETCH_WORK_MS = 1500;
   void clearPrefetchedPage();
+  void releasePageReuse();
   void resetSection();
   bool canQueueNextPagePrefetch() const;
   void idlePrefetchNextPage();
@@ -118,10 +133,9 @@ class EpubReaderActivity final : public ReaderActivity {
   // overlay, letting panel->toolbar steps restore the page without a full
   // re-render. Discarded on close / whenever the page under the overlay changes.
   bool overlayPageStored = false;
-  // A background build step lent the framebuffer: it came back white while the panel still shows the
-  // page. Until renderBook() redraws, nothing may be painted straight onto it. Set by the loop task,
-  // cleared by the render task.
-  std::atomic<bool> pageBufferStale{false};
+  // No reading page is available yet, a child screen owns the pixels, or a background build returned
+  // the framebuffer white. Section resets alone retain valid page pixels. Cleared by the render task.
+  std::atomic<bool> pageBufferStale{true};
   // True while a deferred overlay chrome refresh (pushOverlayRefresh) may still
   // be running on the panel. settleOverlayRefresh() must run before the
   // framebuffer is touched or another differential refresh is pushed.
@@ -161,6 +175,7 @@ class EpubReaderActivity final : public ReaderActivity {
 
   static constexpr int BUILD_PAGES_PER_CHUNK = 8;
   static constexpr int BACKGROUND_BUILD_PAGES_PER_TICK = 2;
+  static constexpr uint32_t BACKGROUND_BUILD_SLICE_MS = 8;
   static constexpr size_t BACKGROUND_BUILD_MIN_FREE_HEAP = 32 * 1024;
   static constexpr size_t BACKGROUND_BUILD_MIN_MAX_ALLOC = 16 * 1024;
   // Requires the render lock; heap admission is checked separately by the build tick.
@@ -170,17 +185,13 @@ class EpubReaderActivity final : public ReaderActivity {
   static constexpr size_t RENDER_MIN_FREE_HEAP = 24 * 1024;
   static constexpr int BUILD_WINDOW_AHEAD = 5;
   static constexpr int PARTIAL_REBUILD_START_MARGIN = 15;
-  static constexpr int BUILD_POPUP_PAGE_THRESHOLD = 20;
-  static constexpr size_t BUILD_POPUP_BYTE_THRESHOLD = 96 * 1024;
-  static constexpr unsigned long BUILD_POPUP_DEADLINE_MS = 1000;
-  bool buildPopupPending = false;
-  void showBuildPopup(GfxRenderer& renderer, int& pagesUntilFullRefresh);
+  void showIndexingPopup(uint32_t pageLoans);
   bool applyDeferredReposition();
   void clearDeferredReposition();
   void rememberCurrentContentOffset();
   bool saveProgress(int spineIndex, int currentPage, int pageCount);
   void jumpToPercent(int percent);
-  void onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction action);
+  void onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction action, bool contentsSheet = false);
   // Live section position, or the values cached before a child screen
   // released the section.
   ChapterPosition chapterPosition() const;
@@ -198,8 +209,28 @@ class EpubReaderActivity final : public ReaderActivity {
   // Text panel rows (font, size, line spacing, alignment, focus reading).
   // Persist + re-paginate + re-render under the open panel (live preview).
   void applyTextSettingLive();
+  bool textFormatPending = false;
+  bool formatReflowPending = false, formatIdleQueued = false;
+  bool textPreferencesDirty = false, textSaveSuppressed = false, progressSaveSuppressed = false;
+  struct FormatProgress {
+    int spine, page, count;
+    std::optional<uint32_t> offset;
+  };
+  std::optional<FormatProgress> formatProgress;
+  bool flushFormatProgress();
+  void rememberReflowTarget();
+  uint8_t presentedScreenMargin = 0;
+  std::optional<ReaderRenderSpec> presentedTextSpec;
+  enum class FormatPreparation : uint8_t { Ready, Pending, Failed };
+  FormatPreparation prepareFormatPage(const ReaderRenderSpec& spec);
+  void queueFormatIdle();
+  bool formatInputHeld() const;
+  bool finalPagePresented = false;
+  uint32_t renderedOperation = 0;
+  unsigned long textFormatChangedAt = 0;
+  void commitTextFormat();
   void paintOverlayPopup();
-  // Persist the reader text settings, (re)load the selected SD font, and
+  // Queue preference persistence, (re)load the selected SD font, and
   // re-paginate the current chapter so changes apply without re-opening the book.
   void applyReaderTextSettings();
   // More panel rows.
@@ -225,9 +256,11 @@ class EpubReaderActivity final : public ReaderActivity {
   void navigateToHref(const std::string& href, bool savePosition = false);
   void restoreSavedPosition();
 
-  void renderContents(std::unique_ptr<Page> page, int orientedMarginTop, int orientedMarginRight,
-                      int orientedMarginBottom, int orientedMarginLeft);
+  void renderContents(Page& page, int orientedMarginTop, int orientedMarginRight, int orientedMarginBottom,
+                      int orientedMarginLeft);
   void drawClippingHighlights(const Page& page, int fontId, int orientedMarginTop, int orientedMarginLeft) const;
+  char barChapterTitle[64]{};
+  int barChapterSpine = -1;
   void renderStatusBar();
   void restoreContentsPosition(ContentsPosition position) override;
   ContentsPosition contentsPagePosition() const override;
@@ -266,12 +299,22 @@ class EpubReaderActivity final : public ReaderActivity {
       : ReaderActivity("EpubReader", renderer, mappedInput, std::move(bookPath), allowFastInitialRefresh) {}
   ~EpubReaderActivity() override;
   void onExit() override;
+  void prepareForChild() override;
+  void prepareForSleep() override;
   void runIdleWork() override;
 
   void loop() override;
   void openTextSettings() override;
+  bool readerMenuTapAllowed(int x, int y) const override;
   void render(RenderLock&& lock) override;
+  bool presentationComplete() const override {
+    return finalPagePresented && !textFormatPending && !formatReflowPending && !overlayRefreshPending;
+  }
 
+  bool makeRoomForChapterBuild();
+  bool canStartRemoteRadio() const override { return !section || !section->isBuilding(); }
+  bool remoteShortcut(bool readerMenu) override;
+  bool inputOverPage() const override { return overlay != Overlay::None || endOfBookMenuActive(); }
   bool pageTurn(bool isForward) override;
   bool skipPages(int amount) override;
   bool isAtEndOfBook() const override;

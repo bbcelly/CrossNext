@@ -13,15 +13,16 @@
 #include "../activities/ActivityManager.h"
 #include "ShelfFolderActivity.h"
 #include "ShelfHidden.h"
+#include "ShelfOrder.h"
 #include "ShelfState.h"
 #include "battleship/BattleshipActivity.h"
+#include "calculator/CalculatorActivity.h"
 #include "carnivoro/CarnivoroActivity.h"
-#include "carnivoro/CarnivoroIcon.h"
 #include "checkers/DraughtsActivity.h"
 #include "chess/ChessActivity.h"
-#include "components/icons/listIcons.h"
 #include "connectfour/ConnectFourActivity.h"
 #include "flashcards/FlashcardsActivity.h"
+#include "focus/FocusActivity.h"
 #include "forehead/ForeheadActivity.h"
 #include "game2048/Game2048Activity.h"
 #include "go/GoActivity.h"
@@ -38,7 +39,6 @@
 #include "player/PlayerActivity.h"
 #include "pocketgames/PocketGamesActivity.h"
 #include "pomodoro/PomodoroActivity.h"
-#include "pomodoro/PomodoroIcon.h"
 #include "quest/ReadingQuestActivity.h"
 #include "quotes/QuotesActivity.h"
 #include "solitaire/SolitaireActivity.h"
@@ -46,8 +46,8 @@
 #include "sudoku/SudokuActivity.h"
 #include "tools/ToolsActivity.h"
 #include "toybattle/ToyBattleActivity.h"
-#include "ui/ExtraIcons.h"
-#include "ui/ToyboxIcons.h"
+#include "ui/GameMenuIcons.h"
+#include "ui/NavigationIcons.h"
 #include "wallpapers/WallpapersActivity.h"
 #include "wikipedia/WikipediaActivity.h"
 #include "wordle/WordleActivity.h"
@@ -56,41 +56,41 @@
 
 namespace {
 
-// Icons come from tools_local/toybox/icons.txt via Lucide. Picked for silhouette
-// rather than literalness: a crown, a hull, a grid and a card suit share no
-// shape, so a row is scannable before the label is read.
+// Menu artwork uses upright flash masks; game boards own their own art.
 constexpr shelf::Item kGames[] = {
-    {"CHESS", &icon_chess_32, &ChessActivity::create},
-    {"CHECKERS", &icon_checkers_32, &DraughtsActivity::create},
-    {"GO", &icon_go_32, &GoActivity::create},
-    {"MINESWEEPER", &icon_minesweeper_32, &MinesweeperActivity::create},
-    {"PICROSS", &icon_picross_32, &PicrossActivity::create},
-    {"WORDLE", &icon_wordle_32, &WordleActivity::create},
-    {"2048", &icon_connections_32, &Game2048Activity::create},
-    {"THE INTERCEPT", &icon_underhand_32, &InterceptActivity::create},
-    {"BATTLESHIP", &icon_battleship_32, &BattleshipActivity::create},
-    {"SOLITAIRE", &icon_solitaire_32, &SolitaireActivity::create},
-    {"HEARTS", &icon_hearts_32, &HeartsActivity::create},
-    {"MURDLE", &icon_murdle_32, &MurdleActivity::create},
-    {"CARNIVORO", &carnivoroPawIcon, &CarnivoroActivity::create},
-    {"CONNECT FOUR", &icon_connectfour_32, &ConnectFourActivity::create},
-    {"SUDOKU", &icon_sudoku_32, &SudokuActivity::create},
-    {"OTHELLO", &extra_circle_dot_32, &PocketGamesActivity::createOthello},
+    {"CHESS", &gameicons::Chess40, &ChessActivity::create},
+    {"CHECKERS", &gameicons::Checkers40, &DraughtsActivity::create},
+    {"GO", &gameicons::Go40, &GoActivity::create},
+    {"MINESWEEPER", &gameicons::Minesweeper40, &MinesweeperActivity::create},
+    {"PICROSS", &gameicons::Picross40, &PicrossActivity::create},
+    {"WORDLE", &gameicons::Wordle40, &WordleActivity::create},
+    {"2048", &gameicons::Game204840, &Game2048Activity::create},
+    {"THE INTERCEPT", &gameicons::Intercept40, &InterceptActivity::create},
+    {"BATTLESHIP", &gameicons::Battleship40, &BattleshipActivity::create},
+    {"SOLITAIRE", &gameicons::Solitaire40, &SolitaireActivity::create},
+    {"HEARTS", &gameicons::Hearts40, &HeartsActivity::create},
+    {"MURDLE", &gameicons::Murdle40, &MurdleActivity::create},
+    {"CARNIVORO", &gameicons::Carnivoro40, &CarnivoroActivity::create},
+    {"CONNECT FOUR", &gameicons::ConnectFour40, &ConnectFourActivity::create},
+    {"SUDOKU", &gameicons::Sudoku40, &SudokuActivity::create},
+    {"OTHELLO", &navicons::Othello32, &PocketGamesActivity::createOthello},
 };
 constexpr shelf::Item kApps[] = {
-    {"READING QUEST", &icon_dungeon_32, &ReadingQuestActivity::create},
-    {"PET", &icon_cat_animals_32, &PetActivity::create},
-    {"HABITS", &icon_tick_24, &HabitsActivity::create},
-    {"TO DO LIST", &icon_murdle_face_clues_32, &NotesActivity::createTodo},
-    {"NOTES", &extra_notes_32, &NotesActivity::create},
-    {"POMODORO", &pomodoro::timerIcon, &PomodoroActivity::create},
-    {"WALLPAPERS", &icon_wallpapers_32, &WallpapersActivity::create},
-    {"QUOTES", &icon_library_32, &QuotesActivity::create},
-    {"FLASHCARDS", &extra_cards_32, &FlashcardsActivity::create},
-    {"WORDS", &icon_library_32, &WordsActivity::create},
-    {"CALENDAR", &extra_calendar_32, &ToolsActivity::calendar},
-    {"CLOCK", &extra_clock_32, &ToolsActivity::clock},
-    {"COUNTER", &icon_calculator_32, &ToolsActivity::counter},
+    {"READING QUEST", &navicons::BookOpen32, &ReadingQuestActivity::create},
+    {"PET", &navicons::Paw32, &PetActivity::create},
+    {"HABITS", &navicons::Check32, &HabitsActivity::create},
+    {"TO DO LIST", &navicons::List32, &NotesActivity::createTodo},
+    {"NOTES", &navicons::Note32, &NotesActivity::create},
+    {"POMODORO", &navicons::Timer32, &PomodoroActivity::create},
+    {"WALLPAPERS", &navicons::Image32, &WallpapersActivity::create},
+    {"QUOTES", &navicons::Books32, &QuotesActivity::create},
+    {"FLASHCARDS", &navicons::Cards32, &FlashcardsActivity::create},
+    {"WORDS", &navicons::Books32, &WordsActivity::create},
+    {"CALENDAR", &navicons::Calendar32, &ToolsActivity::calendar},
+    {"CLOCK", &navicons::Clock32, &ToolsActivity::clock},
+    {"COUNTER", &navicons::Counter32, &ToolsActivity::counter},
+    {"FOCUS", &navicons::Focus32, &FocusActivity::create},
+    {"CALCULATOR", &navicons::Calculator32, &CalculatorActivity::create},
 };
 
 // The two rows Home grows, in reading order. Titles are Title Case because
@@ -98,8 +98,8 @@ constexpr shelf::Item kApps[] = {
 // shouts its own header, which is our side of the line. A third folder is one row here and
 // nothing else: the Home hook counts this table rather than knowing its length.
 constexpr shelf::Folder kFolders[] = {
-    {"Games", UIIcon::Games, &icon_go_settings_32, kGames, static_cast<int>(sizeof(kGames) / sizeof(shelf::Item))},
-    {"Apps", UIIcon::Apps, &icon_apps_32, kApps, static_cast<int>(sizeof(kApps) / sizeof(shelf::Item))},
+    {"Games", UIIcon::Games, &navicons::Gear32, kGames, static_cast<int>(sizeof(kGames) / sizeof(shelf::Item))},
+    {"Apps", UIIcon::Apps, &navicons::Gear32, kApps, static_cast<int>(sizeof(kApps) / sizeof(shelf::Item))},
 };
 
 constexpr int kFolderCount = static_cast<int>(sizeof(kFolders) / sizeof(kFolders[0]));
@@ -179,6 +179,72 @@ bool homeReturn = false;
 shelf::State state;
 bool stateLoaded = false;
 
+shelf::Order itemOrder[shelf::MAX_FOLDERS];
+bool orderLoaded = false;
+constexpr const char* kOrderPath = "/.crosspoint/shelf-order.cfg";
+constexpr const char* kOrderTempPath = "/.crosspoint/shelf-order.cfg.tmp";
+constexpr shelf::OrderPaths kOrderPaths{kOrderPath, kOrderTempPath, "/.crosspoint/shelf-order.cfg.bak"};
+constexpr size_t kMaxOrderFileBytes = 16384;
+constexpr bool orderFitsRegistry() {
+  for (const auto& folder : kFolders)
+    if (folder.count > shelf::Order::CAPACITY) return false;
+  return true;
+}
+static_assert(orderFitsRegistry(), "raise shelf::Order::CAPACITY for a larger registry");
+
+void ensureOrderLoaded() {
+  if (orderLoaded) return;
+  orderLoaded = true;
+  if (!shelf::recoverOrderFile(Storage, kOrderPaths)) LOG_ERR("SHELF", "Could not recover item order");
+  {
+    HalFile file;
+    if (Storage.openFileForRead("SHELF", kOrderPath, file) && file.fileSize64() <= kMaxOrderFileBytes) {
+      char chunk[128];
+      shelf::OrderLine line;
+      bool failed = false;
+      while (file.available()) {
+        const int bytes = file.read(chunk, sizeof(chunk));
+        if (bytes <= 0) {
+          failed = true;
+          break;
+        }
+        for (int n = 0; n < bytes; ++n)
+          if (line.push(chunk[n])) shelf::consumeOrderLine(line.text, kFolders, kFolderCount, itemOrder);
+        delay(0);
+      }
+      if (failed) {
+        LOG_ERR("SHELF", "Could not read item order");
+        for (auto& order : itemOrder) order.count = 0;
+      }
+    }
+  }
+  for (int folder = 0; folder < kFolderCount; ++folder) itemOrder[folder].complete(kFolders[folder].count);
+}
+
+bool saveItemOrder() {
+  bool okay = true;
+  {
+    HalFile file;
+    if (!Storage.openFileForWrite("SHELF", kOrderTempPath, file)) return false;
+    char line[64];
+    for (int folder = 0; folder < kFolderCount && okay; ++folder)
+      for (int row = 0; row < itemOrder[folder].count; ++row) {
+        const auto& self = kFolders[folder];
+        const int bytes =
+            snprintf(line, sizeof(line), "%s\t%s\n", self.title, self.items[itemOrder[folder].items[row]].title);
+        if (bytes < 0 || bytes >= int(sizeof(line)) || file.write(line, size_t(bytes)) != size_t(bytes)) {
+          okay = false;
+          break;
+        }
+      }
+    if (!file.close()) okay = false;
+  }
+  if (shelf::publishOrderFile(Storage, kOrderPaths, okay)) return true;
+  LOG_ERR("SHELF", "Could not save item order");
+  Storage.remove(kOrderTempPath);
+  return false;
+}
+
 // The items no folder shows, by title, mirroring shelf-hidden.cfg. Loaded on
 // the first question anyone asks of it and not at boot, because the shelf has
 // no init hook -- the same lazy load the position uses, for the same reason.
@@ -245,7 +311,12 @@ void loadState() {
 #endif
 }
 
-void saveState() {
+bool stateDirty = false;
+uint32_t stateSaveAttempt = 0;
+
+void saveState(const bool defer = false) {
+  stateDirty = true;
+  if (defer) return;
 #if defined(ARDUINO_ARCH_ESP32) || defined(SIMULATOR)
   char line[96];
   const size_t used = shelf::formatState(state, kFolderCount, line, sizeof(line));
@@ -253,7 +324,7 @@ void saveState() {
     LOG_ERR("SHELF", "State line did not fit %d bytes", static_cast<int>(sizeof(line)));
     return;
   }
-  Storage.writeFile(kStatePath, String(line));
+  if (Storage.writeFile(kStatePath, String(line))) stateDirty = false;
 #endif
 }
 
@@ -292,27 +363,26 @@ void saveHiddenItems() {
 #endif
 }
 
-// Only when something actually changed. Opening a folder happens on every Back,
-// and SPIFFS sectors have a finite erase count, so an unconditional write here
-// would be a write per navigation for no gain.
-void saveIfChanged(const int folder, const int row) {
+// Reopening an unchanged folder should not serialize or write the SD state.
+void saveIfChanged(const int folder, const int row, const bool defer = true) {
   ensureLoaded();
   if (state.lastFolder == folder && (folder < 0 || state.resumeRow[folder] == row)) return;
   state.lastFolder = folder;
   if (folder >= 0) state.resumeRow[folder] = row;
-  saveState();
+  saveState(defer);
 }
 
 // The item wake should reopen, or none. Kept separate from saveIfChanged
 // because the two facts change on different events: the position changes as you
 // navigate, this changes when an item opens, closes, or is left behind.
-void setOpenTitle(const char* title, shelf::LaunchOrigin origin = shelf::LaunchOrigin::Folder) {
+void setOpenTitle(const char* title, shelf::LaunchOrigin origin = shelf::LaunchOrigin::Folder,
+                  const bool defer = true) {
   ensureLoaded();
   const char* wanted = title == nullptr ? "" : title;
   if (strcmp(state.openTitle, wanted) == 0 && state.origin == origin) return;
   snprintf(state.openTitle, sizeof(state.openTitle), "%s", wanted);
   state.origin = origin;
-  saveState();
+  saveState(defer);
 }
 
 // Replaces the running activity, or logs and stays put. Every launch in this
@@ -323,6 +393,7 @@ bool replaceWith(std::unique_ptr<Activity> activity, const char* what) {
     LOG_ERR("SHELF", "OOM opening %s", what);
     return false;
   }
+  activity->setRemoteControlEnabled();
   activityManager.replaceActivity(std::move(activity));
   // Read back from the activity itself rather than written down beside the
   // registry: a table mapping titles to activity names would be a second copy
@@ -360,10 +431,13 @@ const char* label(const char* stableTitle) {
   if (std::strcmp(stableTitle, "CALENDAR") == 0) return tr(STR_UI_CALENDAR_09D04E);
   if (std::strcmp(stableTitle, "CLOCK") == 0) return tr(STR_UI_CLOCK_6E3C9D);
   if (std::strcmp(stableTitle, "COUNTER") == 0) return tr(STR_UI_COUNTER_C1AA9D);
+  if (std::strcmp(stableTitle, "FOCUS") == 0) return tr(STR_FOCUS_APP);
+  if (std::strcmp(stableTitle, "CALCULATOR") == 0) return tr(STR_CALCULATOR_APP);
   if (std::strcmp(stableTitle, "TO DO LIST") == 0) return tr(STR_UI_TO_DO_LIST_D61BE9);
   if (std::strcmp(stableTitle, "NOTES") == 0) return tr(STR_UI_NOTES_E69FC1);
   if (std::strcmp(stableTitle, "HABITS") == 0) return tr(STR_UI_HABITS_630758);
   if (std::strcmp(stableTitle, "Games") == 0) return tr(STR_SHORT_GAMES);
+  if (std::strcmp(stableTitle, "Apps") == 0) return tr(STR_HOME_APPS);
   return stableTitle;
 }
 
@@ -376,15 +450,28 @@ void openFolder(const int index, GfxRenderer& renderer, MappedInputManager& mapp
     LOG_ERR("SHELF", "Bad folder index: %d", index);
     return;
   }
+  auto next = ShelfFolderActivity::create(renderer, mappedInput, index);
+  if (!next) {
+    LOG_ERR("SHELF", "OOM opening %s", kFolders[index].title);
+    return;
+  }
   // Opening a folder means nothing below it is open any more. Clearing here
   // rather than in leave() keeps the fact true even when a folder is reached by
   // some route that did not go through leave().
   openFolderIndex = -1;
   homeReturn = true;
   ensureLoaded();
-  saveIfChanged(index, state.resumeRow[index]);
-  setOpenTitle(nullptr);
-  replaceWith(ShelfFolderActivity::create(renderer, mappedInput, index), kFolders[index].title);
+  saveIfChanged(index, state.resumeRow[index], true);
+  setOpenTitle(nullptr, LaunchOrigin::Folder, true);
+  replaceWith(std::move(next), kFolders[index].title);
+}
+
+bool hasPendingState() { return stateDirty; }
+
+void flushPendingState(const uint32_t now) {
+  if (!stateDirty || (now && stateSaveAttempt && uint32_t(now - stateSaveAttempt) < 1000)) return;
+  if (now) stateSaveAttempt = now;
+  saveState();
 }
 
 bool openItem(const int folder, const int item, GfxRenderer& renderer, MappedInputManager& mappedInput,
@@ -456,13 +543,30 @@ int shownCount(const int folder) {
 int shownItem(const int folder, const int row) {
   if (folder < 0 || folder >= kFolderCount) return -1;
   ensureHiddenLoaded();
-  return shownItemIn(hiddenItems, kFolders[folder].count, row, titlesOf(folder));
+  ensureOrderLoaded();
+  return orderedShownItem(itemOrder[folder], hiddenItems, row, titlesOf(folder));
+}
+
+int orderedItem(const int folder, const int row) {
+  if (folder < 0 || folder >= kFolderCount) return -1;
+  ensureOrderLoaded();
+  return itemOrder[folder].at(row);
+}
+
+bool moveOrderedItem(const int folder, const int row, const int delta) {
+  if (folder < 0 || folder >= kFolderCount) return false;
+  ensureOrderLoaded();
+  if (!itemOrder[folder].move(row, delta)) return false;
+  if (saveItemOrder()) return true;
+  itemOrder[folder].move(row + delta, -delta);
+  return false;
 }
 
 int shownRowFor(const int folder, const int item) {
   if (folder < 0 || folder >= kFolderCount) return 0;
   ensureHiddenLoaded();
-  return shownRowForIn(hiddenItems, kFolders[folder].count, item, titlesOf(folder));
+  ensureOrderLoaded();
+  return orderedShownRowFor(itemOrder[folder], hiddenItems, item, titlesOf(folder));
 }
 
 void autostartFromEnv(GfxRenderer& renderer, MappedInputManager& mappedInput) {
@@ -489,7 +593,10 @@ void autostartFromEnv(GfxRenderer& renderer, MappedInputManager& mappedInput) {
 
 void rememberForWake(const char* currentActivityName) {
   ensureLoaded();
-  if (state.openTitle[0] == '\0') return;
+  if (state.openTitle[0] == '\0') {
+    flushPendingState();
+    return;
+  }
   // An item is only still open if the activity it launched is the one on
   // screen. Leaving a game by the Home gesture never passes through leave(),
   // so without this a sleep taken on Home would resume into the game you left.
@@ -498,6 +605,7 @@ void rememberForWake(const char* currentActivityName) {
     LOG_DBG("SHELF", "Sleeping on %s, not %s: nothing to resume", onScreen, state.openTitle);
     setOpenTitle(nullptr);
   }
+  flushPendingState();
 }
 
 bool resumeFromWake(GfxRenderer& renderer, MappedInputManager& mappedInput) {

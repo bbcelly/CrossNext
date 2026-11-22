@@ -83,6 +83,10 @@ int folderCount();
 
 // Open folder `index` from Home. Out of range is a no-op and logged.
 void openFolder(int index, GfxRenderer& renderer, MappedInputManager& mappedInput);
+// Input-task callers hold RenderLock. Timed calls retry at most once a second;
+// a zero timestamp forces persistence before sleep.
+bool hasPendingState();
+void flushPendingState(uint32_t now = 0);
 
 // Open item `item` of folder `folder`, and remember which folder it came from
 // so leave() can undo it. False if the item could not be created, in which case
@@ -121,6 +125,11 @@ int shownCount(int folder);
 // The one place a row becomes an item, so a tap cannot open a game the row
 // under the finger was not naming.
 int shownItem(int folder, int row);
+
+// All installed items in the saved order, including hidden items.
+int orderedItem(int folder, int row);
+// One adjacent move, saved by stable folder/item titles. A failed write rolls back.
+bool moveOrderedItem(int folder, int row, int delta);
 
 // How many shown items sit BEFORE registry item `item` -- which is the shown
 // row of `item` itself when it is shown, and the row of the next surviving

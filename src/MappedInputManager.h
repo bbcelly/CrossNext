@@ -2,8 +2,11 @@
 
 #include <HalGPIO.h>
 
+#include "apps_local/readertext/ReaderMenuTrigger.h"
 #include "util/ButtonReleaseGate.h"
+#include "util/EdgeLightGesture.h"
 #include "util/HomeButtonInput.h"
+#include "util/RemoteButtonInput.h"
 #include "util/SideButtonActions.h"
 
 class GfxRenderer;
@@ -60,6 +63,15 @@ class MappedInputManager {
 
   // Timed logical actions can remain pending after their physical contact ends.
   uint32_t nextActionDelayMs(uint32_t now, uint32_t maximum) const;
+  edgelight::Event edgeLightEvent() const { return edgeLight; }
+  void setGlobalHomeAction(HomeButtonAction action) { homeAction = action; }
+  void setReaderTextContext(bool active) {
+    if (!active) {
+      readerMenuButtons.cancel();
+      readerHomeOwned = false;
+    }
+    readerTextContext = active;
+  }
 
   // ---- The press/release seam. See util/ButtonReleaseGate.h for the bug.
   //
@@ -85,6 +97,13 @@ class MappedInputManager {
   // expires. The main loop supplies that one-frame event here.
   void setPowerConfirmClickFrame(const bool clicked) { powerConfirmClickFrame = clicked; }
 #endif
+  bool injectRemoteClick(RemoteButton button);
+  bool claimRemoteCommand();
+  bool injectRemoteAction(SideButtonAction action);
+  bool remotePowerClick() const { return remoteInput.button == RemoteButton::Power; }
+  bool hasRemoteClick() const { return remoteInput.used; }
+  void claimRemoteFrame() { remoteInput.used = true; }
+  void resetRemoteInput() { remoteInput.reset(); }
   bool wasPressed(Button button) const;
   bool wasReleased(Button button) const;
   // One-shot threshold event while the button is down; consumes its release.
@@ -165,9 +184,8 @@ class MappedInputManager {
   // Back = left-to-right swipe anchored at the left edge. Public so swipe-mode
   // page turns (reader) can exclude it from a plain SwipeDir::Right.
   bool wasBackGesture() const;
-  // Home-key boards use a short Home-key tap to exit; their bottom-edge swipe
-  // is intentionally unused. Other boards retain the bottom-edge Home gesture.
-  // The reader menu remains on its existing top-edge gesture and middle tap.
+  // Home-key boards always use a short Home-key tap to exit. Reading reserves
+  // the bottom edge for book controls; other boards retain their Home gesture.
   bool wasHomeGesture() const;
   // Configured one-frame action, independent of the gesture that triggered it.
   HomeButtonAction homeButtonAction() const { return homeAction; }
@@ -203,6 +221,7 @@ class MappedInputManager {
   [[nodiscard]] bool isNavDirectionSwapped() const;
 
  private:
+  bool remoteInputAvailable() const;
   bool edgeBackEnabled = true;
   mutable SideButtonEvent sideEvent{};
   mutable SideButtonEvent deferredSideEvent{};
@@ -241,8 +260,13 @@ class MappedInputManager {
   // accessor on this class is const and the bookkeeping rides along with them.
   mutable ButtonReleaseGate releaseGate;
 
+  mutable RemoteButtonInput remoteInput;
   mutable HomeButtonInput homeButtonInput;
   mutable HomeButtonAction homeAction = HomeButtonAction::Ignore;
+  bool readerTextContext = false;
+  mutable bool readerHomeOwned = false;
+  mutable readertext::MenuButtonInput readerMenuButtons;
+  mutable edgelight::Event edgeLight;
   mutable HomeButtonAction deferredHomeAction = HomeButtonAction::Ignore;
   mutable bool touchHeldOverrideValid = false;
   mutable unsigned long touchHeldOverrideMs = 0;

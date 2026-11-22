@@ -25,6 +25,7 @@ class CatalogActivity : public UiListActivity {
   };
 
   void onEnter() override;
+  bool allowsRemoteControl() const override { return false; }
   void onExit() override;
 
  protected:
@@ -42,6 +43,8 @@ class CatalogActivity : public UiListActivity {
   virtual bool hasSearch() const = 0;
   virtual void performSearch(const std::string& query) = 0;
   virtual void downloadFinished(bool cancelled) = 0;
+  virtual void wifiSelectionCancelled();
+  virtual std::string searchPrefill() const { return {}; }
 
   bool handleCustomInput() override;
   void navigateButtons() override;
@@ -64,7 +67,7 @@ class CatalogActivity : public UiListActivity {
                                              const std::string& user = {}, const std::string& password = {},
                                              const std::vector<HttpDownloader::Header>& headers = {});
   void screenHeader(UiScreen& screen, const char* title);
-  bool buildStatusScreen(UiScreen& screen, bool boldError = true, bool showDownloadTotal = false);
+  bool buildStatusScreen(UiScreen& screen, bool boldError = true);
 
  private:
   static void onSearchEvent(const freeink::ui::ActionEvent&, void* user);

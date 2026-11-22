@@ -13,6 +13,7 @@
 
 #include "MappedInputManager.h"
 #include "RecentBooksStore.h"
+#include "apps_local/readerbars/ReaderBars.h"
 #include "components/CoverGridHomeUi.h"
 #include "components/themes/BaseTheme.h"
 #include "components/themes/lyra/Lyra3CoversTheme.h"
@@ -77,6 +78,7 @@ void UITheme::setTheme(CrossPointSettings::UI_THEME type) {
 
 void UITheme::setInterfaceSection(menufont::Section section) {
   interfaceSection = section;
+  chrome::headerColor = chrome::normalizedHeaderColor(SETTINGS.interfaceHeaderColor);
   const auto choice = section == menufont::Section::General || section == menufont::Section::Home
                           ? 0
                           : SETTINGS.interfaceThemeOverrides[int(section)];
@@ -171,7 +173,15 @@ UIIcon UITheme::getFileIcon(const std::string& filename) {
   return File;
 }
 
+int UITheme::getReaderTopBarHeight() {
+  return SETTINGS.readerBars.customized ? readerbars::barHeight(SETTINGS.readerBars.top) : 0;
+}
+
 int UITheme::getStatusBarHeight() {
+  if (SETTINGS.readerBars.customized) {
+    const int height = readerbars::barHeight(SETTINGS.readerBars.bottom);
+    return height ? height + 4 : 0;
+  }
   const ThemeMetrics metrics = UITheme::getInstance().getMetrics();
   const auto sb = SETTINGS.statusBarSpec();
 
@@ -182,6 +192,10 @@ int UITheme::getStatusBarHeight() {
 }
 
 int UITheme::getProgressBarHeight() {
+  if (SETTINGS.readerBars.customized) {
+    const int height = SETTINGS.readerBars.bottom.progressHeight();
+    return height ? height + UITheme::getInstance().getMetrics().progressBarMarginTop + 4 : 0;
+  }
   const ThemeMetrics metrics = UITheme::getInstance().getMetrics();
   const auto sb = SETTINGS.statusBarSpec();
   return sb.showsProgressBar() ? (sb.progressBarHeightPx + metrics.progressBarMarginTop) : 0;

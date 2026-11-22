@@ -9,6 +9,7 @@
 #include <Utf8.h>
 
 #include <algorithm>
+#include <cstring>
 #include <functional>
 
 #include "../../apps_local/library/LibraryMenu.h"
@@ -21,13 +22,17 @@
 #include "activities/plugins/PluginCatalogActivity.h"
 #include "activities/util/ConfirmationActivity.h"
 #include "activities/util/KeyboardEntryActivity.h"
+#include "apps_local/files/FolderVisibility.h"
 #include "apps_local/home/HomeMenuIntegration.h"
+#include "apps_local/library/CollectionFolder.h"
+#include "apps_local/library/CollectionsActivity.h"
 #include "apps_local/ui/PixelMenuTheme.h"
 #include "apps_local/ui/ToyboxFonts.h"
 #include "components/UITheme.h"
 #include "components/UiAppHelpers.h"
 #include "fontIds.h"
 #include "util/BookCacheUtils.h"
+#include "util/BookDictionarySettings.h"
 #include "util/BookmarkUtil.h"
 
 namespace fui = freeink::ui;
@@ -96,12 +101,12 @@ FileBrowserActivity::FileBrowserActivity(GfxRenderer& renderer, MappedInputManag
   if (mode == Mode::Books) setInterfaceFontSection(menufont::Section::Files);
 }
 
-void FileBrowserActivity::loadFiles() {
+void FileBrowserActivity::loadFiles(HalFile* directory) {
   files.clear();
   unicodeNames = std::any_of(basepath.begin(), basepath.end(), [](unsigned char ch) { return ch >= 0x80; });
   prewarmedStart = -1;  // new folder contents: re-prewarm the visible window
 
-  auto root = Storage.open(basepath.c_str());
+  auto root = directory ? std::move(*directory) : Storage.open(basepath.c_str());
   if (!root || !root.isDirectory()) {
     return;
   }
@@ -119,11 +124,17 @@ void FileBrowserActivity::loadFiles() {
   // count-only pass reads no names, so filtered-out entries just over-reserve
   // by a few slots.
   size_t entryCount = 0;
-  for (auto file = root.openNextFile(); file; file = root.openNextFile()) ++entryCount;
+  HalFile file;
+  bool ioError = false;
+  while (root.openNextFile(file, ioError)) ++entryCount;
+  if (ioError) {
+    LOG_ERR("FileBrowser", "Directory count failed");
+    return;
+  }
   root.rewindDirectory();
   files.reserve(entryCount);
 
-  for (auto file = root.openNextFile(); file; file = root.openNextFile()) {
+  while (root.openNextFile(file, ioError)) {
     file.getName(fileNameBuffer.get(), NAME_BUFFER_SIZE);
     const bool isDirectory = file.isDirectory();
     if ((!SETTINGS.showHiddenFiles && fileNameBuffer[0] == '.') ||
@@ -131,7 +142,9 @@ void FileBrowserActivity::loadFiles() {
       continue;
     }
 
-    if (isDirectory && basepath == "/" && content::appFolder(fileNameBuffer.get())) continue;
+    if (isDirectory && foldervisibility::hidden(basepath.c_str(), fileNameBuffer.get(), SETTINGS.showHiddenFiles,
+                                                rowNameBuf, sizeof(rowNameBuf)))
+      continue;
     if (isDirectory) {
       files.emplace_back(std::string(fileNameBuffer.get()) + "/");
     } else {
@@ -147,7 +160,11 @@ void FileBrowserActivity::loadFiles() {
       }
     }
   }
-  root.close();
+  if (ioError) {
+    LOG_ERR("FileBrowser", "Directory enumeration failed");
+    files.clear();
+    return;
+  }
   FsHelpers::sortFileList(files);
   for (const auto& entry : files) {
     for (const unsigned char ch : entry) unicodeNames |= ch >= 0x80;
@@ -241,7 +258,7 @@ void FileBrowserActivity::onEnter() {
     // The first screen build pulls the viewport to it (ListNav follow-on-build).
     nav.selected = static_cast<int>(findEntry(fileName));
   } else {
-    loadFiles();
+    loadFiles(&root);
   }
 }
 
@@ -394,18 +411,81 @@ void FileBrowserActivity::showEntryActions() {
   }
 
   const bool isDirectory = files[nav.selected].back() == '/';
-  static constexpr StrId FILE_OPTIONS[] = {StrId::STR_OPEN, StrId::STR_DELETE, StrId::STR_RENAME};
-  static constexpr StrId DIRECTORY_OPTIONS[] = {StrId::STR_OPEN, StrId::STR_DELETE};
-  optionPopup.show(StrId::STR_FILENAME, isDirectory ? DIRECTORY_OPTIONS : FILE_OPTIONS, isDirectory ? 2 : 3, 0,
-                   [this](const int index) {
-                     if (index == 0) {
-                       activateSelected();
-                     } else if (index == 1) {
-                       deleteSelected();
-                     } else if (index == 2) {
-                       startRename();
-                     }
-                   });
+  std::string fullPath = basepath;
+  if (fullPath.back() != '/') fullPath += '/';
+  fullPath += files[nav.selected];
+  if (isDirectory && fullPath.back() == '/') fullPath.pop_back();
+  const bool isBook = !isDirectory && collections::bookFile(fullPath.c_str());
+  const auto failed = [this] {
+    const char* confirm[] = {tr(STR_CONFIRM)};
+    optionPopup.showMessage(tr(STR_COLLECTIONS), tr(STR_COLLECTION_FAILED), confirm, 1, 0, [](int) {});
+    requestUpdate();
+  };
+  bool favorite = false;
+  if (isBook && !collections::isFavorite(fullPath.c_str(), favorite)) {
+    LOG_ERR("FILE", "Cannot read favorites");
+    failed();
+    return;
+  }
+  const char* fileOptions[] = {tr(STR_OPEN), tr(STR_DELETE), tr(STR_RENAME),
+                               favorite ? tr(STR_BOOK_UNFAVORITE) : tr(STR_BOOK_FAVORITE), tr(STR_COLLECTION_ADD)};
+  const bool canHide =
+      isDirectory && !foldervisibility::defaultHidden(basepath.c_str(), std::strrchr(fullPath.c_str(), '/') + 1);
+  bool folderHidden = false;
+  if (canHide) {
+    RenderLock lock(*this);
+    folderHidden = foldervisibility::marked(fullPath.c_str(), rowNameBuf, sizeof(rowNameBuf));
+  }
+  const char* folderOptions[] = {tr(STR_OPEN), tr(STR_DELETE), tr(STR_COLLECTION_FROM_FOLDER),
+                                 folderHidden ? tr(STR_SHOW) : tr(STR_HIDE)};
+  optionPopup.show(
+      tr(STR_FILENAME), isDirectory ? folderOptions : fileOptions,
+      isDirectory ? (canHide ? 4 : 3)
+      : isBook    ? 5
+                  : 3,
+      -1, [this, fullPath, isDirectory, favorite, folderHidden, failed](int choice) {
+        if (choice == 0) {
+          activateSelected();
+          return;
+        }
+        if (choice == 1) {
+          deleteSelected();
+          return;
+        }
+        if (!isDirectory && choice == 2) {
+          startRename();
+          return;
+        }
+        RenderLock lock(*this);
+        if (isDirectory && choice == 3) {
+          if (!foldervisibility::setMarked(fullPath.c_str(), !folderHidden, rowNameBuf, sizeof(rowNameBuf))) {
+            const char* confirm[] = {tr(STR_CONFIRM)};
+            optionPopup.showMessage(tr(STR_FILENAME), tr(STR_SDK_SETTINGS_SAVE_FAILED), confirm, 1, -1, [](int) {});
+          } else {
+            loadFiles();
+            nav.selected = files.empty() ? 0 : std::min<int>(nav.selected, listCount() - 1);
+            nav.follow(listCount());
+          }
+          requestUpdate();
+          return;
+        }
+        if (!isDirectory && choice == 3) {
+          if (!collections::setFavorite(fullPath.c_str(), !favorite)) {
+            LOG_ERR("FILE", "Favorite save failed");
+            failed();
+          }
+          requestUpdate();
+          return;
+        }
+        auto child = makeUniqueNoThrow<CollectionsActivity>(
+            renderer, mappedInput, isDirectory ? std::string{} : fullPath, isDirectory ? fullPath : std::string{});
+        if (!child) {
+          LOG_ERR("FILE", "OOM: collections");
+          failed();
+          return;
+        }
+        startActivityForResult(std::move(child), [this](const ActivityResult&) { requestUpdate(); });
+      });
   requestUpdate();
 }
 
@@ -511,6 +591,13 @@ void FileBrowserActivity::renameSelectedFile(const std::string& oldPath, const s
     return;
   }
 
+  if (!bookdictionary::move(oldPath.c_str(), newPath.c_str())) {
+    LOG_ERR("FileBrowser", "Could not move book dictionaries; restoring file");
+    if (!ClippingStore::moveBook(newPath, oldPath)) LOG_ERR("FileBrowser", "Could not restore renamed book");
+    rollBackStatePath(oldBookmarkPath, newBookmarkPath, bookmarksMoved);
+    rollBackStatePath(oldCachePath, newCachePath, cacheMoved);
+    return;
+  }
   RECENT_BOOKS.updatePath(oldPath, newPath, oldCachePath, newCachePath);
   if (APP_STATE.openEpubPath == oldPath) {
     APP_STATE.openEpubPath = newPath;
@@ -672,7 +759,7 @@ void FileBrowserActivity::drawChrome() {
                            : chrome::lightHeader      ? tr(STR_BROWSE_FILES)
                            : basepath == "/"          ? tr(STR_SD_CARD)
                                                       : basepath.c_str() + basepath.rfind('/') + 1;
-  pixelui::drawHeader(renderer, folderName, unicodeNames || I18N.getLanguage() != Language::EN);
+  pixelui::drawHeader(renderer, folderName, unicodeNames || I18N.getLanguage() != Language::EN, nullptr, false, true);
 }
 
 void FileBrowserActivity::drawFooter() {

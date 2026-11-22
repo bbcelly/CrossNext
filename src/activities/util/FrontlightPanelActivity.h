@@ -32,7 +32,10 @@ class FrontlightPanelActivity final : public Activity, private UiAppHost {
   // reflected user intent in the first place.
   bool lightOnChanged = false;
   bool draggingSlider = false;
+  bool sliderPaintPending = false;
+  std::atomic<unsigned long> lastPanelPaint{0};
   bool suspendedForWifi = false;
+  bool wifiConnected = false;
   unsigned long lastClockPoll = 0;
   std::atomic<int> shownMinute{-1};
   int panelBottom = 0;
@@ -44,6 +47,11 @@ class FrontlightPanelActivity final : public Activity, private UiAppHost {
   static constexpr int kTileCount = 4;
 
   quickui::Work panelWork;
+  quickui::Model panelModel, paintedModel;
+  int paintedWidth = 0, paintedHeight = 0;
+  uint8_t paintedOrientation = 0;
+  bool paintedLightHeader = false;
+  bluetoothui::State bluetoothState = bluetoothui::State::Off;
   freeink::ui::HeaderProps status;
 
   static void panelScreen(UiScreen& screen, void* user);
@@ -51,16 +59,20 @@ class FrontlightPanelActivity final : public Activity, private UiAppHost {
   static void onWarmthEvent(const freeink::ui::ActionEvent& event, void* user);
   static void onBrightnessStepEvent(const freeink::ui::ActionEvent& event, void* user);
   static void onWarmthStepEvent(const freeink::ui::ActionEvent& event, void* user);
+  static void onSettingsEvent(const freeink::ui::ActionEvent& event, void* user);
   static void onTileEvent(const freeink::ui::ActionEvent& event, void* user);
 
   void buildPanelScreen(UiScreen& screen);
-  int computePanelBottom() const;
+  void preparePanelModel();
   void adjustBrightness(int delta);
   void adjustWarmth(int delta);
   void toggleLight();
   void toggleWarmth();
   void runTile(int idx);
+  void openBluetoothSettings();
+  void openWifiSettings();
   void syncLightState(bool useSavedWarmth = false);
+  void syncBluetoothState(bluetoothui::State state);
   // Copy the panel's live brightness/warmth/lightOn into SETTINGS and save if
   // anything actually changed. onExit() runs it on every way out.
   void persistLightSettings();
@@ -79,4 +91,5 @@ class FrontlightPanelActivity final : public Activity, private UiAppHost {
   void loop() override;
   void render(RenderLock&&) override;
   bool handleHomeGesture() override;
+  bool allowsRemoteControl() const override { return true; }
 };

@@ -2,6 +2,7 @@
 #include <I18n.h>
 
 #include "../../activities/UiListActivity.h"
+#include "../../activities/plugins/PluginCatalogActivity.h"
 #include "../ui/PixelMenu.h"
 #include "HomeMenuIntegration.h"
 #include "HomeMenuOrderUi.h"
@@ -22,7 +23,8 @@ class HomeMenuSettingsActivity final : public UiListActivity {
   void drawFooter() override;
 
  private:
-  enum class View { Root, Names, Visibility, ChooseGame, ChooseApp, Order };
+  enum class View { Root, Names, Visibility, ChooseGame, ChooseApp, ChoosePlugin, Order, GameOrder, AppOrder };
+  std::vector<PluginRef> pluginChoices;
   View view = View::Root;
   homemenu::Config draft;
   pixelui::RowSource rowText;
@@ -36,6 +38,8 @@ class HomeMenuSettingsActivity final : public UiListActivity {
   int menuRows() const;
   homemenu::Id idAtRow(int index) const;
   int pickerFolder() const { return view == View::ChooseGame ? 0 : 1; }
+  bool ordersShelf() const { return view == View::GameOrder || view == View::AppOrder; }
+  int orderFolder() const { return view == View::GameOrder ? 0 : 1; }
   static void provideRow(void* context, uint16_t index, freeink::ui::ListItem& row);
   static void moveAction(const freeink::ui::ActionEvent& event, void* context);
 };

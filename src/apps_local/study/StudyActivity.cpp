@@ -3,6 +3,7 @@
 #include <I18n.h>
 #include <Logging.h>
 #include <Memory.h>
+#include <SdCardFontSystem.h>
 #include <WiFi.h>
 #include <esp_sntp.h>
 
@@ -37,6 +38,8 @@
 #include "components/SideButtonNavigation.h"
 #include "components/UiAppHelpers.h"
 #include "fontIds.h"
+
+extern SdCardFontSystem sdFontSystem;
 
 namespace {
 
@@ -150,6 +153,7 @@ std::unique_ptr<Activity> StudyActivity::openInstalled(GfxRenderer& renderer, Ma
 }
 
 void StudyActivity::onEnter() {
+  sdFontSystem.ensureBundledFonts(renderer);
   Activity::onEnter();
   toybox::ensureFonts(renderer);
 
@@ -1261,7 +1265,8 @@ int StudyActivity::drawWrappedMarked(int fontId, const int y, const int maxWidth
   const int rubyFontId = fontsReady_ ? fonts_.rubyFontId() : 0;
   const study::SizedTextTarget target(renderer, installedOnly_ ? textSizeChoice_ : 0, rubyFontId, installedOnly_);
   return study::drawWrappedMarked(target, fontId, y, maxWidth, text, spanStart, spanLength, measureOnly, line,
-                                  kLineBytes, scratch, rubyFontId, clipBottom_, &clipped_, cardCenterX_, &textPages_);
+                                  kLineBytes, scratch, rubyFontId, clipBottom_, &clipped_, cardCenterX_, &textPages_,
+                                  installedOnly_ ? SETTINGS.flashcardTextAlignment : 1);
 }
 
 bool StudyActivity::fitsAsDrawn(const int fontId, const char* text, const int maxWidth) const {
@@ -1574,7 +1579,7 @@ void StudyActivity::loadZoomImage() {
     zoomAttempted_ = true;
     if (zoomUpgradeAttempted_) return;
     zoomUpgradeAttempted_ = true;
-    GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
+    GUI.drawLoadingScreen(renderer, tr(STR_LOADING_POPUP));
     if (!flashcards::upgradeZoomImages(deckDir_)) {
       // A legacy monochrome HD copy still works without the original package.
       if (valid) continue;
@@ -2226,7 +2231,7 @@ void StudyActivity::render(RenderLock&&) {
     } else if (plain) {
       target.setFont(4, flashcards::textSizeFont(textSizeChoice_));
       flashui::textPage(target, contentLayout.content, plainText, cardTextPage_, textScratch_, sizeof(textScratch_),
-                        &plainPages_, textSizeChoice_);
+                        &plainPages_, textSizeChoice_, SETTINGS.flashcardTextAlignment);
     } else
       drawCard(Rect{contentLayout.content.x, contentLayout.content.y, contentLayout.content.width,
                     contentLayout.content.height});

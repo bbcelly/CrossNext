@@ -39,13 +39,21 @@ struct Header {
   fui::ActionId markAction = 0;
   fui::BitmapRef secondaryMark{};
   fui::ActionId secondaryMarkAction = 0;
+  const char* secondaryLabel = nullptr;
   uint16_t actionInputMask = fui::InputTouch;
   bool compactPercent = false;
+  LabelCase titleCase = LabelCase::Sentence;
+  bool regularTitle = false;
+  bool homeBattery = false;
 };
 void header(toybox::Screen& screen, Header model);
 void header(fui::DrawTarget& target, const fui::DeviceContext& device, const Header& model);
+// Use on screens that paint the entire header here, including its decorations.
+void headerWithSelectedColor(fui::DrawTarget& target, const fui::DeviceContext& device, const Header& model,
+                             bool outputInverted);
 void text(fui::DrawTarget& target, fui::Rect box, const char* label, fui::FontId font = kBody,
-          fui::Color color = fui::Color::Black, fui::TextAlign align = fui::TextAlign::Left, bool emphasis = false);
+          fui::Color color = fui::Color::Black, fui::TextAlign align = fui::TextAlign::Left, bool emphasis = false,
+          LabelCase casing = LabelCase::Sentence);
 fui::StyleSet rowStyles();
 fui::StyleSet buttonStyles();
 void styleList(fui::ListProps& props, bool dense = false);
@@ -105,14 +113,14 @@ void tabs(Screen& screen, const fui::TabItem* items, int count, fui::ActionId ac
 // The same SDK row measurement as list(), including wrapped names and values.
 template <typename Screen>
 void list(Screen& screen, fui::ListProps& props, bool fillFrame = false, bool frameSections = false,
-          uint8_t frameWidth = kBorder, bool trailingPreview = false) {
+          uint8_t frameWidth = kBorder, bool trailingPreview = false, bool frameInLight = false) {
   props = screen.resolveListProps(props);
   props.rowRadius = 0;
   props.partialTrailingRow = trailingPreview;
   const auto band = screen.body();
   const auto rows = rowArea(band, props);
   fui::list(screen.frame(), band, props);
-  if (chrome::lightHeader) return;
+  if (chrome::lightHeader && !frameInLight) return;
   int height = 0;
   int frameTop = -1;
   const auto finishFrame = [&]() {
@@ -138,7 +146,7 @@ void list(Screen& screen, fui::ListProps& props, bool fillFrame = false, bool fr
     const int prefix = heading ? headingHeight + props.rowGap : 0;
     const int rowHeight =
         item.isHeader ? headingHeight
-                      : fui::measureListRow(screen.target(), screen.frame().assets(), rows.width, props, item).height;
+                      : fui::cachedListRow(screen.target(), screen.frame().assets(), rows.width, props, item).height;
     const int next = sectionGap + prefix + rowHeight;
     if (height + next > band.height) {
       if (!frameSections || !trailingPreview || band.height - height - sectionGap < props.partialTrailingMinHeight)
